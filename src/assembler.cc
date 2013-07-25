@@ -168,6 +168,7 @@ PredictableCodeSizeScope::PredictableCodeSizeScope(AssemblerBase* assembler,
       start_offset_(assembler->pc_offset()),
       old_value_(assembler->predictable_code_size()) {
   assembler_->set_predictable_code_size(true);
+  assembler_->enter_predictable_mode();
 }
 
 

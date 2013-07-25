@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -101,46 +101,46 @@ class Decoder {
   void PrintRegister(int reg);
   void PrintSRegister(int reg);
   void PrintDRegister(int reg);
-  int FormatVFPRegister(Instruction* instr, const char* format);
-  void PrintMovwMovt(Instruction* instr);
-  int FormatVFPinstruction(Instruction* instr, const char* format);
-  void PrintCondition(Instruction* instr);
-  void PrintShiftRm(Instruction* instr);
-  void PrintShiftImm(Instruction* instr);
-  void PrintShiftSat(Instruction* instr);
-  void PrintPU(Instruction* instr);
+  int FormatVFPRegister(arm::Instruction* instr, const char* format);
+  void PrintMovwMovt(arm::Instruction* instr);
+  int FormatVFPinstruction(arm::Instruction* instr, const char* format);
+  void PrintCondition(arm::Instruction* instr);
+  void PrintShiftRm(arm::Instruction* instr);
+  void PrintShiftImm(arm::Instruction* instr);
+  void PrintShiftSat(arm::Instruction* instr);
+  void PrintPU(arm::Instruction* instr);
   void PrintSoftwareInterrupt(SoftwareInterruptCodes svc);
 
   // Handle formatting of instructions and their options.
-  int FormatRegister(Instruction* instr, const char* option);
+  int FormatRegister(arm::Instruction* instr, const char* option);
   void FormatNeonList(int Vd, int type);
   void FormatNeonMemory(int Rn, int align, int Rm);
-  int FormatOption(Instruction* instr, const char* option);
-  void Format(Instruction* instr, const char* format);
-  void Unknown(Instruction* instr);
+  int FormatOption(arm::Instruction* instr, const char* option);
+  void Format(arm::Instruction* instr, const char* format);
+  void Unknown(arm::Instruction* instr);
 
   // Each of these functions decodes one particular instruction type, a 3-bit
   // field in the instruction encoding.
   // Types 0 and 1 are combined as they are largely the same except for the way
   // they interpret the shifter operand.
-  void DecodeType01(Instruction* instr);
-  void DecodeType2(Instruction* instr);
-  void DecodeType3(Instruction* instr);
-  void DecodeType4(Instruction* instr);
-  void DecodeType5(Instruction* instr);
-  void DecodeType6(Instruction* instr);
+  void DecodeType01(arm::Instruction* instr);
+  void DecodeType2(arm::Instruction* instr);
+  void DecodeType3(arm::Instruction* instr);
+  void DecodeType4(arm::Instruction* instr);
+  void DecodeType5(arm::Instruction* instr);
+  void DecodeType6(arm::Instruction* instr);
   // Type 7 includes special Debugger instructions.
-  int DecodeType7(Instruction* instr);
+  int DecodeType7(arm::Instruction* instr);
   // For VFP support.
-  void DecodeTypeVFP(Instruction* instr);
-  void DecodeType6CoprocessorIns(Instruction* instr);
+  void DecodeTypeVFP(arm::Instruction* instr);
+  void DecodeType6CoprocessorIns(arm::Instruction* instr);
 
-  void DecodeSpecialCondition(Instruction* instr);
+  void DecodeSpecialCondition(arm::Instruction* instr);
 
-  void DecodeVMOVBetweenCoreAndSinglePrecisionRegisters(Instruction* instr);
-  void DecodeVCMP(Instruction* instr);
-  void DecodeVCVTBetweenDoubleAndSingle(Instruction* instr);
-  void DecodeVCVTBetweenFloatingPointAndInteger(Instruction* instr);
+  void DecodeVMOVBetweenCoreAndSinglePrecisionRegisters(arm::Instruction* instr);
+  void DecodeVCMP(arm::Instruction* instr);
+  void DecodeVCVTBetweenDoubleAndSingle(arm::Instruction* instr);
+  void DecodeVCVTBetweenFloatingPointAndInteger(arm::Instruction* instr);
 
   const disasm::NameConverter& converter_;
   Vector<char> out_buffer_;
@@ -181,7 +181,7 @@ static const char* cond_names[kNumberOfConditions] = {
 
 
 // Print the condition guarding the instruction.
-void Decoder::PrintCondition(Instruction* instr) {
+void Decoder::PrintCondition(arm::Instruction* instr) {
   Print(cond_names[instr->ConditionValue()]);
 }
 
@@ -213,7 +213,7 @@ static const char* const shift_names[kNumberOfShifts] = {
 
 // Print the register shift operands for the instruction. Generally used for
 // data processing instructions.
-void Decoder::PrintShiftRm(Instruction* instr) {
+void Decoder::PrintShiftRm(arm::Instruction* instr) {
   ShiftOp shift = instr->ShiftField();
   int shift_index = instr->ShiftValue();
   int shift_amount = instr->ShiftAmountValue();
@@ -249,7 +249,7 @@ void Decoder::PrintShiftRm(Instruction* instr) {
 
 // Print the immediate operand for the instruction. Generally used for data
 // processing instructions.
-void Decoder::PrintShiftImm(Instruction* instr) {
+void Decoder::PrintShiftImm(arm::Instruction* instr) {
   int rotate = instr->RotateValue() * 2;
   int immed8 = instr->Immed8Value();
   int imm = (immed8 >> rotate) | (immed8 << (32 - rotate));
@@ -259,7 +259,7 @@ void Decoder::PrintShiftImm(Instruction* instr) {
 
 
 // Print the optional shift and immediate used by saturating instructions.
-void Decoder::PrintShiftSat(Instruction* instr) {
+void Decoder::PrintShiftSat(arm::Instruction* instr) {
   int shift = instr->Bits(11, 7);
   if (shift > 0) {
     out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
@@ -271,7 +271,7 @@ void Decoder::PrintShiftSat(Instruction* instr) {
 
 
 // Print PU formatting to reduce complexity of FormatOption.
-void Decoder::PrintPU(Instruction* instr) {
+void Decoder::PrintPU(arm::Instruction* instr) {
   switch (instr->PUField()) {
     case da_x: {
       Print("da");
@@ -325,7 +325,7 @@ void Decoder::PrintSoftwareInterrupt(SoftwareInterruptCodes svc) {
 
 // Handle all register based formatting in this function to reduce the
 // complexity of FormatOption.
-int Decoder::FormatRegister(Instruction* instr, const char* format) {
+int Decoder::FormatRegister(arm::Instruction* instr, const char* format) {
   ASSERT(format[0] == 'r');
   if (format[1] == 'n') {  // 'rn: Rn register
     int reg = instr->RnValue();
@@ -374,7 +374,7 @@ int Decoder::FormatRegister(Instruction* instr, const char* format) {
 
 // Handle all VFP register based formatting in this function to reduce the
 // complexity of FormatOption.
-int Decoder::FormatVFPRegister(Instruction* instr, const char* format) {
+int Decoder::FormatVFPRegister(arm::Instruction* instr, const char* format) {
   ASSERT((format[0] == 'S') || (format[0] == 'D'));
 
   VFPRegPrecision precision =
@@ -417,7 +417,7 @@ int Decoder::FormatVFPRegister(Instruction* instr, const char* format) {
 }
 
 
-int Decoder::FormatVFPinstruction(Instruction* instr, const char* format) {
+int Decoder::FormatVFPinstruction(arm::Instruction* instr, const char* format) {
     Print(format);
     return 0;
 }
@@ -459,7 +459,7 @@ void Decoder::FormatNeonMemory(int Rn, int align, int Rm) {
 
 
 // Print the movw or movt instruction.
-void Decoder::PrintMovwMovt(Instruction* instr) {
+void Decoder::PrintMovwMovt(arm::Instruction* instr) {
   int imm = instr->ImmedMovwMovtValue();
   int rd = instr->RdValue();
   PrintRegister(rd);
@@ -473,7 +473,7 @@ void Decoder::PrintMovwMovt(Instruction* instr) {
 // character of the option string (the option escape has already been
 // consumed by the caller.)  FormatOption returns the number of
 // characters that were consumed from the formatting string.
-int Decoder::FormatOption(Instruction* instr, const char* format) {
+int Decoder::FormatOption(arm::Instruction* instr, const char* format) {
   switch (format[0]) {
     case 'a': {  // 'a: accumulate multiplies
       if (instr->Bit(21) == 0) {
@@ -698,7 +698,7 @@ int Decoder::FormatOption(Instruction* instr, const char* format) {
 // Format takes a formatting string for a whole instruction and prints it into
 // the output buffer. All escaped options are handed to FormatOption to be
 // parsed further.
-void Decoder::Format(Instruction* instr, const char* format) {
+void Decoder::Format(arm::Instruction* instr, const char* format) {
   char cur = *format++;
   while ((cur != 0) && (out_buffer_pos_ < (out_buffer_.length() - 1))) {
     if (cur == '\'') {  // Single quote is used as the formatting escape.
@@ -723,12 +723,12 @@ if(!(condition)) {        \
 
 // For currently unimplemented decodings the disassembler calls Unknown(instr)
 // which will just print "unknown" of the instruction bits.
-void Decoder::Unknown(Instruction* instr) {
+void Decoder::Unknown(arm::Instruction* instr) {
   Format(instr, "unknown");
 }
 
 
-void Decoder::DecodeType01(Instruction* instr) {
+void Decoder::DecodeType01(arm::Instruction* instr) {
   int type = instr->TypeValue();
   if ((type == 0) && instr->IsSpecialType0()) {
     // multiply instruction or extra loads and stores
@@ -855,13 +855,13 @@ void Decoder::DecodeType01(Instruction* instr) {
   } else if ((type == 0) && instr->IsMiscType0()) {
     if (instr->Bits(22, 21) == 1) {
       switch (instr->BitField(7, 4)) {
-        case BX:
+        case arm::BX:
           Format(instr, "bx'cond 'rm");
           break;
-        case BLX:
+        case arm::BLX:
           Format(instr, "blx'cond 'rm");
           break;
-        case BKPT:
+        case arm::BKPT:
           Format(instr, "bkpt 'off0to3and8to19");
           break;
         default:
@@ -870,7 +870,7 @@ void Decoder::DecodeType01(Instruction* instr) {
       }
     } else if (instr->Bits(22, 21) == 3) {
       switch (instr->BitField(7, 4)) {
-        case CLZ:
+        case arm::CLZ:
           Format(instr, "clz'cond 'rd, 'rm");
           break;
         default:
@@ -884,39 +884,39 @@ void Decoder::DecodeType01(Instruction* instr) {
     Format(instr, "nop'cond");
   } else {
     switch (instr->OpcodeField()) {
-      case AND: {
+      case arm::AND: {
         Format(instr, "and'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case EOR: {
+      case arm::EOR: {
         Format(instr, "eor'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case SUB: {
+      case arm::SUB: {
         Format(instr, "sub'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case RSB: {
+      case arm::RSB: {
         Format(instr, "rsb'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case ADD: {
+      case arm::ADD: {
         Format(instr, "add'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case ADC: {
+      case arm::ADC: {
         Format(instr, "adc'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case SBC: {
+      case arm::SBC: {
         Format(instr, "sbc'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case RSC: {
+      case arm::RSC: {
         Format(instr, "rsc'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case TST: {
+      case arm::TST: {
         if (instr->HasS()) {
           Format(instr, "tst'cond 'rn, 'shift_op");
         } else {
@@ -924,7 +924,7 @@ void Decoder::DecodeType01(Instruction* instr) {
         }
         break;
       }
-      case TEQ: {
+      case arm::TEQ: {
         if (instr->HasS()) {
           Format(instr, "teq'cond 'rn, 'shift_op");
         } else {
@@ -934,7 +934,7 @@ void Decoder::DecodeType01(Instruction* instr) {
         }
         break;
       }
-      case CMP: {
+      case arm::CMP: {
         if (instr->HasS()) {
           Format(instr, "cmp'cond 'rn, 'shift_op");
         } else {
@@ -942,7 +942,7 @@ void Decoder::DecodeType01(Instruction* instr) {
         }
         break;
       }
-      case CMN: {
+      case arm::CMN: {
         if (instr->HasS()) {
           Format(instr, "cmn'cond 'rn, 'shift_op");
         } else {
@@ -952,19 +952,19 @@ void Decoder::DecodeType01(Instruction* instr) {
         }
         break;
       }
-      case ORR: {
+      case arm::ORR: {
         Format(instr, "orr'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case MOV: {
+      case arm::MOV: {
         Format(instr, "mov'cond's 'rd, 'shift_op");
         break;
       }
-      case BIC: {
+      case arm::BIC: {
         Format(instr, "bic'cond's 'rd, 'rn, 'shift_op");
         break;
       }
-      case MVN: {
+      case arm::MVN: {
         Format(instr, "mvn'cond's 'rd, 'shift_op");
         break;
       }
@@ -978,7 +978,7 @@ void Decoder::DecodeType01(Instruction* instr) {
 }
 
 
-void Decoder::DecodeType2(Instruction* instr) {
+void Decoder::DecodeType2(arm::Instruction* instr) {
   switch (instr->PUField()) {
     case da_x: {
       if (instr->HasW()) {
@@ -1013,7 +1013,7 @@ void Decoder::DecodeType2(Instruction* instr) {
 }
 
 
-void Decoder::DecodeType3(Instruction* instr) {
+void Decoder::DecodeType3(arm::Instruction* instr) {
   switch (instr->PUField()) {
     case da_x: {
       VERIFY(!instr->HasW());
@@ -1180,7 +1180,7 @@ void Decoder::DecodeType3(Instruction* instr) {
 }
 
 
-void Decoder::DecodeType4(Instruction* instr) {
+void Decoder::DecodeType4(arm::Instruction* instr) {
   if (instr->Bit(22) != 0) {
     // Privileged mode currently not supported.
     Unknown(instr);
@@ -1194,17 +1194,17 @@ void Decoder::DecodeType4(Instruction* instr) {
 }
 
 
-void Decoder::DecodeType5(Instruction* instr) {
+void Decoder::DecodeType5(arm::Instruction* instr) {
   Format(instr, "b'l'cond 'target");
 }
 
 
-void Decoder::DecodeType6(Instruction* instr) {
+void Decoder::DecodeType6(arm::Instruction* instr) {
   DecodeType6CoprocessorIns(instr);
 }
 
 
-int Decoder::DecodeType7(Instruction* instr) {
+int Decoder::DecodeType7(arm::Instruction* instr) {
   if (instr->Bit(24) == 1) {
     if (instr->SvcValue() >= kStopCode) {
       Format(instr, "stop'cond 'svc");
@@ -1213,24 +1213,24 @@ int Decoder::DecodeType7(Instruction* instr) {
       out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
                                       "\n  %p  %08x       stop message: %s",
                                       reinterpret_cast<int32_t*>(instr
-                                                     + Instruction::kInstrSize),
+                                                     + arm::Instruction::kInstrSize),
                                       *reinterpret_cast<char**>(instr
-                                                    + Instruction::kInstrSize),
+                                                    + arm::Instruction::kInstrSize),
                                       *reinterpret_cast<char**>(instr
-                                                    + Instruction::kInstrSize));
-      // We have decoded 2 * Instruction::kInstrSize bytes.
-      return 2 * Instruction::kInstrSize;
+                                                    + arm::Instruction::kInstrSize));
+      // We have decoded 2 * arm::Instruction::kInstrSize bytes.
+      return 2 * arm::Instruction::kInstrSize;
     } else {
       Format(instr, "svc'cond 'svc");
     }
   } else {
     DecodeTypeVFP(instr);
   }
-  return Instruction::kInstrSize;
+  return arm::Instruction::kInstrSize;
 }
 
 
-// void Decoder::DecodeTypeVFP(Instruction* instr)
+// void Decoder::DecodeTypeVFP(arm::Instruction* instr)
 // vmov: Sn = Rt
 // vmov: Rt = Sn
 // vcvt: Dd = Sm
@@ -1248,7 +1248,7 @@ int Decoder::DecodeType7(Instruction* instr) {
 // vmrs
 // vmsr
 // Dd = vsqrt(Dm)
-void Decoder::DecodeTypeVFP(Instruction* instr) {
+void Decoder::DecodeTypeVFP(arm::Instruction* instr) {
   VERIFY((instr->TypeValue() == 7) && (instr->Bit(24) == 0x0) );
   VERIFY(instr->Bits(11, 9) == 0x5);
 
@@ -1367,7 +1367,7 @@ void Decoder::DecodeTypeVFP(Instruction* instr) {
 
 
 void Decoder::DecodeVMOVBetweenCoreAndSinglePrecisionRegisters(
-    Instruction* instr) {
+    arm::Instruction* instr) {
   VERIFY((instr->Bit(4) == 1) && (instr->VCValue() == 0x0) &&
          (instr->VAValue() == 0x0));
 
@@ -1381,7 +1381,7 @@ void Decoder::DecodeVMOVBetweenCoreAndSinglePrecisionRegisters(
 }
 
 
-void Decoder::DecodeVCMP(Instruction* instr) {
+void Decoder::DecodeVCMP(arm::Instruction* instr) {
   VERIFY((instr->Bit(4) == 0) && (instr->Opc1Value() == 0x7));
   VERIFY(((instr->Opc2Value() == 0x4) || (instr->Opc2Value() == 0x5)) &&
          (instr->Opc3Value() & 0x1));
@@ -1404,7 +1404,7 @@ void Decoder::DecodeVCMP(Instruction* instr) {
 }
 
 
-void Decoder::DecodeVCVTBetweenDoubleAndSingle(Instruction* instr) {
+void Decoder::DecodeVCVTBetweenDoubleAndSingle(arm::Instruction* instr) {
   VERIFY((instr->Bit(4) == 0) && (instr->Opc1Value() == 0x7));
   VERIFY((instr->Opc2Value() == 0x7) && (instr->Opc3Value() == 0x3));
 
@@ -1418,7 +1418,7 @@ void Decoder::DecodeVCVTBetweenDoubleAndSingle(Instruction* instr) {
 }
 
 
-void Decoder::DecodeVCVTBetweenFloatingPointAndInteger(Instruction* instr) {
+void Decoder::DecodeVCVTBetweenFloatingPointAndInteger(arm::Instruction* instr) {
   VERIFY((instr->Bit(4) == 0) && (instr->Opc1Value() == 0x7));
   VERIFY(((instr->Opc2Value() == 0x8) && (instr->Opc3Value() & 0x1)) ||
          (((instr->Opc2Value() >> 1) == 0x6) && (instr->Opc3Value() & 0x1)));
@@ -1466,7 +1466,7 @@ void Decoder::DecodeVCVTBetweenFloatingPointAndInteger(Instruction* instr) {
 // <Rt, Rt2> = vmov(Dm)
 // Ddst = MEM(Rbase + 4*offset).
 // MEM(Rbase + 4*offset) = Dsrc.
-void Decoder::DecodeType6CoprocessorIns(Instruction* instr) {
+void Decoder::DecodeType6CoprocessorIns(arm::Instruction* instr) {
   VERIFY(instr->TypeValue() == 6);
 
   if (instr->CoprocessorValue() == 0xA) {
@@ -1555,7 +1555,7 @@ void Decoder::DecodeType6CoprocessorIns(Instruction* instr) {
 }
 
 
-void Decoder::DecodeSpecialCondition(Instruction* instr) {
+void Decoder::DecodeSpecialCondition(arm::Instruction* instr) {
   switch (instr->SpecialValue()) {
     case 5:
       if ((instr->Bits(18, 16) == 0) && (instr->Bits(11, 6) == 0x28) &&
@@ -1643,14 +1643,14 @@ void Decoder::DecodeSpecialCondition(Instruction* instr) {
 
 bool Decoder::IsConstantPoolAt(byte* instr_ptr) {
   int instruction_bits = *(reinterpret_cast<int*>(instr_ptr));
-  return (instruction_bits & kConstantPoolMarkerMask) == kConstantPoolMarker;
+  return (instruction_bits & arm::kConstantPoolMarkerMask) == arm::kConstantPoolMarker;
 }
 
 
 int Decoder::ConstantPoolSizeAt(byte* instr_ptr) {
   if (IsConstantPoolAt(instr_ptr)) {
     int instruction_bits = *(reinterpret_cast<int*>(instr_ptr));
-    return DecodeConstantPoolLength(instruction_bits);
+    return arm::DecodeConstantPoolLength(instruction_bits);
   } else {
     return -1;
   }
@@ -1659,21 +1659,21 @@ int Decoder::ConstantPoolSizeAt(byte* instr_ptr) {
 
 // Disassemble the instruction at *instr_ptr into the output buffer.
 int Decoder::InstructionDecode(byte* instr_ptr) {
-  Instruction* instr = Instruction::At(instr_ptr);
+  arm::Instruction* instr = arm::Instruction::At(instr_ptr);
   // Print raw instruction bytes.
   out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
                                   "%08x       ",
                                   instr->InstructionBits());
   if (instr->ConditionField() == kSpecialCondition) {
     DecodeSpecialCondition(instr);
-    return Instruction::kInstrSize;
+    return arm::Instruction::kInstrSize;
   }
   int instruction_bits = *(reinterpret_cast<int*>(instr_ptr));
-  if ((instruction_bits & kConstantPoolMarkerMask) == kConstantPoolMarker) {
+  if ((instruction_bits & arm::kConstantPoolMarkerMask) == arm::kConstantPoolMarker) {
     out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
                                     "constant pool begin (length %d)",
-                                    DecodeConstantPoolLength(instruction_bits));
-    return Instruction::kInstrSize;
+                                    arm::DecodeConstantPoolLength(instruction_bits));
+    return arm::Instruction::kInstrSize;
   }
   switch (instr->TypeValue()) {
     case 0:
@@ -1710,7 +1710,7 @@ int Decoder::InstructionDecode(byte* instr_ptr) {
       break;
     }
   }
-  return Instruction::kInstrSize;
+  return arm::Instruction::kInstrSize;
 }
 
 

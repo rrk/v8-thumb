@@ -29,6 +29,7 @@
 #define V8_FRAMES_H_
 
 #include "allocation.h"
+#include "cpu.h"
 #include "handles.h"
 #include "safepoint-table.h"
 
@@ -253,8 +254,8 @@ class StackFrame BASE_EMBEDDED {
   // up one word and become unaligned.
   Address UnpaddedFP() const;
 
-  Address pc() const { return *pc_address(); }
-  void set_pc(Address pc) { *pc_address() = pc; }
+  Address pc() const { return CPU::DecodePcAddress(*pc_address()); }
+  void set_pc(Address pc) { *pc_address() = CPU::EncodePcAddress(pc); }
 
   virtual void SetCallerFp(Address caller_fp) = 0;
 

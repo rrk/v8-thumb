@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -100,7 +100,12 @@ static void ProbeTable(Isolate* isolate,
   // It's a nice optimization if this constant is encodable in the bic insn.
 
   uint32_t mask = Code::kFlagsNotUsedInLookup;
-  ASSERT(__ ImmediateFitsAddrMode1Instruction(mask));
+  { // Check that the following bic instruction doesn't kill any
+    // extra registers
+    Sizer ___(masm);
+    ___.bic(flags_reg, flags_reg, Operand(mask));
+    ASSERT(___.KilledRegs() == RegList(flags_reg.bit()));
+  }
   __ bic(flags_reg, flags_reg, Operand(mask));
   __ cmp(flags_reg, Operand(flags));
   __ b(ne, &miss);
@@ -114,7 +119,7 @@ static void ProbeTable(Isolate* isolate,
 #endif
 
   // Jump to the first instruction in the code stub.
-  __ add(pc, code, Operand(Code::kHeaderSize - kHeapObjectTag));
+  __ Jump(code, Operand(Code::kHeaderSize - kHeapObjectTag));
 
   // Miss: fall through.
   __ bind(&miss);

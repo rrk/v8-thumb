@@ -32,7 +32,7 @@
 
 // The original source code covered by the above license above has been
 // modified significantly by Google Inc.
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 
 // A light-weight ARM Assembler
 // Generates user mode instructions for the ARM architecture up to version 5
@@ -42,6 +42,8 @@
 #include <stdio.h>
 #include "assembler.h"
 #include "constants-arm.h"
+#include "reflect-arm-arm.h"
+#include "reflect-arm-thumb.h"
 #include "serialize.h"
 
 namespace v8 {
@@ -154,6 +156,7 @@ struct Register {
 
   bool is_valid() const { return 0 <= code_ && code_ < kNumRegisters; }
   bool is(Register reg) const { return code_ == reg.code_; }
+  inline bool is_pcsp() const;
   int code() const {
     ASSERT(is_valid());
     return code_;
@@ -532,7 +535,6 @@ class Operand BASE_EMBEDDED {
   // the instruction this operand is used for is a MOV or MVN instruction the
   // actual instruction to use is required for this calculation. For other
   // instructions instr is ignored.
-  bool is_single_instruction(const Assembler* assembler, Instr instr = 0) const;
   bool must_output_reloc_info(const Assembler* assembler) const;
 
   inline int32_t immediate() const {
@@ -543,6 +545,8 @@ class Operand BASE_EMBEDDED {
   Register rm() const { return rm_; }
   Register rs() const { return rs_; }
   ShiftOp shift_op() const { return shift_op_; }
+  int shift_imm() const { return shift_imm_; }
+  RelocInfo::Mode rmode() const { return rmode_; }
 
  private:
   Register rm_;
@@ -593,14 +597,19 @@ class MemOperand BASE_EMBEDDED {
       return offset_;
   }
 
+  void set_am(AddrMode am) {
+    am_ = am;
+  }
+
   Register rn() const { return rn_; }
   Register rm() const { return rm_; }
   AddrMode am() const { return am_; }
+  ShiftOp  shift_op() const { return shift_op_;  }
+  int shift_imm() const     { return shift_imm_; }
 
   bool OffsetIsUint12Encodable() const {
     return offset_ >= 0 ? is_uint12(offset_) : is_uint12(-offset_);
   }
-
  private:
   Register rn_;  // base
   Register rm_;  // register offset
@@ -648,28 +657,30 @@ class NeonListOperand BASE_EMBEDDED {
   NeonListType type_;
 };
 
-extern const Instr kMovLrPc;
-extern const Instr kLdrPCMask;
-extern const Instr kLdrPCPattern;
-extern const Instr kBlxRegMask;
-extern const Instr kBlxRegPattern;
-extern const Instr kBlxIp;
+namespace arm {
+  extern const Instr kMovLrPc;
+  extern const Instr kLdrPCMask;
+  extern const Instr kLdrPCPattern;
+  extern const Instr kBlxRegMask;
+  extern const Instr kBlxRegPattern;
+  extern const Instr kBlxIp;
 
-extern const Instr kMovMvnMask;
-extern const Instr kMovMvnPattern;
-extern const Instr kMovMvnFlip;
+  extern const Instr kMovMvnMask;
+  extern const Instr kMovMvnPattern;
+  extern const Instr kMovMvnFlip;
 
-extern const Instr kMovLeaveCCMask;
-extern const Instr kMovLeaveCCPattern;
-extern const Instr kMovwMask;
-extern const Instr kMovwPattern;
-extern const Instr kMovwLeaveCCFlip;
+  extern const Instr kMovLeaveCCMask;
+  extern const Instr kMovLeaveCCPattern;
+  extern const Instr kMovwMask;
+  extern const Instr kMovwPattern;
+  extern const Instr kMovwLeaveCCFlip;
 
-extern const Instr kCmpCmnMask;
-extern const Instr kCmpCmnPattern;
-extern const Instr kCmpCmnFlip;
-extern const Instr kAddSubFlip;
-extern const Instr kAndBicFlip;
+  extern const Instr kCmpCmnMask;
+  extern const Instr kCmpCmnPattern;
+  extern const Instr kCmpCmnFlip;
+  extern const Instr kAddSubFlip;
+  extern const Instr kAndBicFlip;
+}
 
 struct VmovIndex {
   unsigned char index;
@@ -762,7 +773,11 @@ class Assembler : public AssemblerBase {
   static const int kSpecialTargetSize = kPointerSize;
 
   // Size of an instruction.
+#ifndef USE_THUMB
   static const int kInstrSize = sizeof(Instr);
+#else
+  static const int kInstrSize = sizeof(Instr16);
+#endif
 
   // Distance between start of patched return sequence and the emitted address
   // to jump to.
@@ -778,16 +793,45 @@ class Assembler : public AssemblerBase {
   //  blx  ip
   static const int kPatchDebugBreakSlotAddressOffset =  0 * kInstrSize;
 
+#ifndef USE_THUMB
   static const int kPatchDebugBreakSlotReturnOffset = 2 * kInstrSize;
+#else
+  static const int kPatchDebugBreakSlotReturnOffset = 3 * kInstrSize;
+#endif
 
   // Difference between address of current opcode and value read from pc
   // register.
+#ifndef USE_THUMB
   static const int kPcLoadDelta = 8;
+#else
+  static const int kPcLoadDelta = 4;
+#endif
 
+#ifndef USE_THUMB
   static const int kJSReturnSequenceInstructions = 4;
+#else
+   // mov     sp, r11
+   // ldmia.w sp!, {r11, lr}
+   // addw    sp, sp, #4
+   // bx      lr
+  static const int kJSReturnSequenceInstructions = 6;
+#endif
+
+#ifndef USE_THUMB
   static const int kDebugBreakSlotInstructions = 3;
+#else
+  //          ldr ip, [pc, jump_addr]
+  //          blx ip
+  //jump_addr dd [int32]
+  static const int kDebugBreakSlotInstructions = 5;
+#endif
+
   static const int kDebugBreakSlotLength =
       kDebugBreakSlotInstructions * kInstrSize;
+
+  static const int kDebugBreakSlotAddressOffset =
+    kDebugBreakSlotLength - sizeof(int32_t);
+
 
   // ---------------------------------------------------------------------------
   // Code generation
@@ -800,7 +844,7 @@ class Assembler : public AssemblerBase {
   void CodeTargetAlign();
 
   // Branch instructions
-  void b(int branch_offset, Condition cond = al);
+  void b(int branch_offset, Condition cond = al, bool offset_is_final = false);
   void bl(int branch_offset, Condition cond = al);
   void blx(int branch_offset);  // v5 and above
   void blx(Register target, Condition cond = al);  // v5 and above
@@ -808,11 +852,17 @@ class Assembler : public AssemblerBase {
 
   // Convenience branch instructions using labels
   void b(Label* L, Condition cond = al)  {
-    b(branch_offset(L, cond == al), cond);
+    b(branch_offset(L, cond == al), cond, L->is_bound());
   }
-  void b(Condition cond, Label* L)  { b(branch_offset(L, cond == al), cond); }
-  void bl(Label* L, Condition cond = al)  { bl(branch_offset(L, false), cond); }
-  void bl(Condition cond, Label* L)  { bl(branch_offset(L, false), cond); }
+  void b(Condition cond, Label* L)  { b(branch_offset(L, cond == al), cond, L->is_bound()); }
+
+  void bl(Label* L, Condition cond = al)  {
+    bl(branch_offset(L, false), cond);
+  }
+  void bl(Condition cond, Label* L) {
+    bl(branch_offset(L, false), cond);
+  }
+
   void blx(Label* L)  { blx(branch_offset(L, false)); }  // v5 and above
 
   // Data-processing instructions
@@ -876,11 +926,12 @@ class Assembler : public AssemblerBase {
   void mov(Register dst, Register src, SBit s = LeaveCC, Condition cond = al) {
     mov(dst, Operand(src), s, cond);
   }
-
   // ARMv7 instructions for loading a 32 bit immediate in two instructions.
   // This may actually emit a different mov instruction, but on an ARMv7 it
   // is guaranteed to only emit one instruction.
   void movw(Register reg, uint32_t immediate, Condition cond = al);
+  // This one is pure movw (one 32bit instruction)
+  void movw_(Register reg, uint32_t immediate, Condition cond = al);
   // The constant for movt should be in the range 0-0xffff.
   void movt(Register reg, uint32_t immediate, Condition cond = al);
 
@@ -1003,6 +1054,8 @@ class Assembler : public AssemblerBase {
 
   // Coprocessor instructions
 
+  void emit_coproc(const Instr instr, const Condition cond);
+
   void cdp(Coprocessor coproc, int opcode_1,
            CRegister crd, CRegister crn, CRegister crm,
            int opcode_2, Condition cond = al);
@@ -1039,6 +1092,7 @@ class Assembler : public AssemblerBase {
 
   // Support for VFP.
   // All these APIs support S0 to S31 and D0 to D31.
+  void emit_vfp(const Instr instr, const Condition cond);
 
   void vldr(const DwVfpRegister dst,
             const Register base,
@@ -1202,6 +1256,7 @@ class Assembler : public AssemblerBase {
   // Support for NEON.
   // All these APIs support D0 to D31 and Q0 to Q15.
 
+  void emit_neon(const Instr instr);
   void vld1(NeonSize size,
             const NeonListOperand& dst,
             const NeonMemOperand& src);
@@ -1255,12 +1310,23 @@ class Assembler : public AssemblerBase {
   }
 
   // Check the number of instructions generated from label to here.
+  // WARNING (thumb): This will actually return not the number of actual
+  // instructions but a number of small instructions!!!
   int InstructionsGeneratedSince(Label* label) {
     return SizeOfCodeGeneratedSince(label) / kInstrSize;
   }
 
-  // Check whether an immediate fits an addressing mode 1 instruction.
-  bool ImmediateFitsAddrMode1Instruction(int32_t imm32);
+  RegList KilledRegs() const {
+    return killed_regs_;
+  }
+
+  bool IsKilled(Register r) const {
+    return killed_regs_ & r.bit();
+  }
+
+  void ResetKilled() {
+    killed_regs_ = 0;
+  }
 
   // Class for scoping postponing the constant pool generation.
   class BlockConstPoolScope {
@@ -1332,47 +1398,6 @@ class Assembler : public AssemblerBase {
 
   PositionsRecorder* positions_recorder() { return &positions_recorder_; }
 
-  // Read/patch instructions
-  Instr instr_at(int pos) { return *reinterpret_cast<Instr*>(buffer_ + pos); }
-  void instr_at_put(int pos, Instr instr) {
-    *reinterpret_cast<Instr*>(buffer_ + pos) = instr;
-  }
-  static Instr instr_at(byte* pc) { return *reinterpret_cast<Instr*>(pc); }
-  static void instr_at_put(byte* pc, Instr instr) {
-    *reinterpret_cast<Instr*>(pc) = instr;
-  }
-  static Condition GetCondition(Instr instr);
-  static bool IsBranch(Instr instr);
-  static int GetBranchOffset(Instr instr);
-  static bool IsLdrRegisterImmediate(Instr instr);
-  static bool IsVldrDRegisterImmediate(Instr instr);
-  static int GetLdrRegisterImmediateOffset(Instr instr);
-  static int GetVldrDRegisterImmediateOffset(Instr instr);
-  static Instr SetLdrRegisterImmediateOffset(Instr instr, int offset);
-  static Instr SetVldrDRegisterImmediateOffset(Instr instr, int offset);
-  static bool IsStrRegisterImmediate(Instr instr);
-  static Instr SetStrRegisterImmediateOffset(Instr instr, int offset);
-  static bool IsAddRegisterImmediate(Instr instr);
-  static Instr SetAddRegisterImmediateOffset(Instr instr, int offset);
-  static Register GetRd(Instr instr);
-  static Register GetRn(Instr instr);
-  static Register GetRm(Instr instr);
-  static bool IsPush(Instr instr);
-  static bool IsPop(Instr instr);
-  static bool IsStrRegFpOffset(Instr instr);
-  static bool IsLdrRegFpOffset(Instr instr);
-  static bool IsStrRegFpNegOffset(Instr instr);
-  static bool IsLdrRegFpNegOffset(Instr instr);
-  static bool IsLdrPcImmediateOffset(Instr instr);
-  static bool IsVldrDPcImmediateOffset(Instr instr);
-  static bool IsTstImmediate(Instr instr);
-  static bool IsCmpRegister(Instr instr);
-  static bool IsCmpImmediate(Instr instr);
-  static Register GetCmpImmediateRegister(Instr instr);
-  static int GetCmpImmediateRawImmediate(Instr instr);
-  static bool IsNop(Instr instr, int type = NON_MARKING_NOP);
-  static bool IsMovT(Instr instr);
-  static bool IsMovW(Instr instr);
 
   // Constants in pools are accessed via pc relative addressing, which can
   // reach +/-4KB for integer PC-relative loads and +/-1KB for floating-point
@@ -1438,7 +1463,19 @@ class Assembler : public AssemblerBase {
            (pc_offset() < no_const_pool_before_);
   }
 
+  // Mark the given register as killed
+  void Kill(const Register r) {
+    killed_regs_ |= r.bit();
+  }
+  // Mark the set of registrs as killed
+  void Kill(const RegList rl) {
+    killed_regs_ |= rl;
+  }
+
+  // Emit classic arm instruction
+  inline void emit(Instr x);
  private:
+
   int next_buffer_check_;  // pc offset of next buffer check
 
   // Code generation
@@ -1497,10 +1534,13 @@ class Assembler : public AssemblerBase {
   // The bound position, before this we cannot do instruction elimination.
   int last_bound_pos_;
 
+  // A set of registers killed by the code
+  RegList killed_regs_;
+
   // Code emission
   inline void CheckBuffer();
   void GrowBuffer();
-  inline void emit(Instr x);
+
 
   // 32-bit immediate values
   void move_32_bit_immediate(Condition cond,
@@ -1508,14 +1548,11 @@ class Assembler : public AssemblerBase {
                              SBit s,
                              const Operand& x);
 
-  // Instruction generation
-  void addrmod1(Instr instr, Register rn, Register rd, const Operand& x);
-  void addrmod2(Instr instr, Register rd, const MemOperand& x);
-  void addrmod3(Instr instr, Register rd, const MemOperand& x);
-  void addrmod4(Instr instr, Register rn, RegList rl);
-  void addrmod5(Instr instr, CRegister crd, const MemOperand& x);
+  void coproc_addrmod(Instr instr, CRegister crd, const MemOperand& x, Condition cond);
 
   // Labels
+  // The link chain is terminated by a negative code position (must be aligned)
+  static const int kEndOfChain = -4;
   void print(Label* L);
   void bind_to(Label* L, int pos);
   void link_to(Label* L, Label* appendix);
@@ -1540,6 +1577,13 @@ class Assembler : public AssemblerBase {
   PositionsRecorder positions_recorder_;
   friend class PositionsRecorder;
   friend class EnsureSpace;
+
+// thumb/arm specific emission routines
+#ifndef USE_THUMB
+#include "arm/assembler-arm-arm.h"
+#else
+#include "arm/assembler-arm-thumb.h"
+#endif
 };
 
 
@@ -1550,6 +1594,44 @@ class EnsureSpace BASE_EMBEDDED {
   }
 };
 
+template<typename ParentAssemblerType>
+class SizerImpl : public ParentAssemblerType {
+  static const int BUFFER_SIZE = 1024;
+  static const int AST_ID_MAGIC = 0xbaadc0de;
+  char buffer[BUFFER_SIZE];
+  Label start_;
+public:
+  SizerImpl(ParentAssemblerType* parent = NULL) : ParentAssemblerType(NULL, buffer, BUFFER_SIZE) {
+    ParentAssemblerType::SetRecordedAstId(TypeFeedbackId(AST_ID_MAGIC));
+    if (parent != NULL) {
+      ParentAssemblerType::set_predictable_code_size(parent->predictable_code_size());
+    }
+#ifdef USE_THUMB
+    if (parent != NULL) {
+      using namespace thumb16;
+      // Check if there is an open IT block in the parent, and
+      // recover the state of the block
+      int it_size = parent->it_size();
+      if (it_size > 0) {
+        Condition c = parent->it_cond();
+        for (int i = 0; i < it_size; i++) {
+          ParentAssemblerType::cond(c, true);
+          // We pad with bkpt instructions for readability
+          ParentAssemblerType::emit16(Instr16(misc::BKPT | 0xbb), kSpecialCondition);
+        }
+      }
+      // Instructions that follow may fall into the remaining space in the block,
+      // as they would in the parent, therefore reducing the measured size.
+    }
+#endif
+    ParentAssemblerType::bind(&start_);
+  }
+  int SizeOfCode() {
+    return ParentAssemblerType::SizeOfCodeGeneratedSince(&start_);
+  }
+};
+
+typedef SizerImpl<Assembler> Sizer;
 
 } }  // namespace v8::internal
 

@@ -550,6 +550,7 @@
             '../../src/arm/assembler-arm-inl.h',
             '../../src/arm/assembler-arm.cc',
             '../../src/arm/assembler-arm.h',
+            '../../src/arm/assembler-vfp.cc',
             '../../src/arm/builtins-arm.cc',
             '../../src/arm/code-stubs-arm.cc',
             '../../src/arm/code-stubs-arm.h',
@@ -575,8 +576,27 @@
             '../../src/arm/macro-assembler-arm.h',
             '../../src/arm/regexp-macro-assembler-arm.cc',
             '../../src/arm/regexp-macro-assembler-arm.h',
+            '../../src/arm/reflect-arm-arm.cc',
+            '../../src/arm/reflect-arm-arm.h',
+            '../../src/arm/reflect-arm-thumb.cc',
+            '../../src/arm/reflect-arm-thumb.h',
             '../../src/arm/simulator-arm.cc',
             '../../src/arm/stub-cache-arm.cc',
+          ],
+          'conditions': [
+            ['arm_jit_thumb==1', {
+              'sources': [
+                '../../src/arm/assembler-arm-thumb.cc',
+                '../../src/arm/assembler-arm-thumb-inl.h',
+                '../../src/arm/assembler-arm-thumb.h',
+              ],
+            }, {
+              'sources': [
+                '../../src/arm/assembler-arm-arm.cc',
+                '../../src/arm/assembler-arm-arm-inl.h',
+                '../../src/arm/assembler-arm-arm.h',
+              ],
+            }],
           ],
         }],
         ['v8_target_arch=="ia32" or v8_target_arch=="mac" or OS=="mac"', {

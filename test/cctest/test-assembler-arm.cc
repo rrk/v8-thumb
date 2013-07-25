@@ -1409,4 +1409,45 @@ TEST(16) {
   CHECK_EQ(0x11121313, t.dst4);
 }
 
+TEST(17) {
+  CcTest::InitializeVM();
+  Isolate* isolate = Isolate::Current();
+  HandleScope scope(isolate);
+
+  Assembler assm(isolate, NULL, 0);
+
+  __ mov(r0, Operand(0));
+  __ orr(r0, r0, Operand(0x11));
+  __ orr(r0, r0, Operand(0x2200));
+  __ orr(r0, r0, Operand(0x330000));
+  __ orr(r0, r0, Operand(0x44000000));
+  __ mov(r1, Operand(0));
+  __ orr(r1, r1, Operand(0x01));
+  __ orr(r1, r1, Operand(0x0100));
+  __ orr(r1, r1, Operand(0x010000));
+  __ orr(r1, r1, Operand(0x01000000));
+  __ mov(r2, Operand(0));
+  __ orr(r2, r2, Operand(0x80));
+  __ orr(r2, r2, Operand(0x8000));
+  __ orr(r2, r2, Operand(0x800000));
+  __ orr(r2, r2, Operand(0x80000000));
+  __ add(r0, r0, r1);
+  __ add(r0, r0, r2);
+  __ mov(pc, Operand(lr));
+
+  CodeDesc desc;
+  assm.GetCode(&desc);
+  Object* code = isolate->heap()->CreateCode(
+      desc,
+      Code::ComputeFlags(Code::STUB),
+      Handle<Code>())->ToObjectChecked();
+  CHECK(code->IsCode());
+#ifdef DEBUG
+  Code::cast(code)->Print();
+#endif
+  F1 f = FUNCTION_CAST<F2>(Code::cast(code)->entry());
+  int res = reinterpret_cast<int>(CALL_GENERATED_CODE(f, 0, 0, 0, 0, 0));
+  ::printf("f() = %x\n", res);
+  CHECK_EQ(0x44332211 + 0x01010101 + 0x80808080, res);
+}
 #undef __

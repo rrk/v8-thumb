@@ -1,4 +1,4 @@
-// Copyright 2009 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -35,6 +35,7 @@
 namespace v8 {
 namespace internal {
 
+namespace arm {
 double Instruction::DoubleImmedVmov() const {
   // Reconstruct a double from the immediate encoded in the vmov instruction.
   //
@@ -53,6 +54,7 @@ double Instruction::DoubleImmedVmov() const {
   double d;
   OS::MemCopy(&d, &imm, 8);
   return d;
+}
 }
 
 

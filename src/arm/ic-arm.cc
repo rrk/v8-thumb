@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -1633,8 +1633,13 @@ bool CompareIC::HasInlinedSmiCode(Address address) {
 
   // If the instruction following the call is not a cmp rx, #yyy, nothing
   // was inlined.
+#ifndef USE_THUMB
   Instr instr = Assembler::instr_at(cmp_instruction_address);
-  return Assembler::IsCmpImmediate(instr);
+  return arm::IsCmpImmediate(instr);
+#else
+  Instr32 instr = Assembler::instr32_at(cmp_instruction_address);
+  return thumb32::IsCmpImmediate(instr);
+#endif
 }
 
 
@@ -1644,16 +1649,27 @@ void PatchInlinedSmiCode(Address address, InlinedSmiCheck check) {
 
   // If the instruction following the call is not a cmp rx, #yyy, nothing
   // was inlined.
+#ifndef USE_THUMB
   Instr instr = Assembler::instr_at(cmp_instruction_address);
-  if (!Assembler::IsCmpImmediate(instr)) {
+  if (!arm::IsCmpImmediate(instr)) {
     return;
   }
 
   // The delta to the start of the map check instruction and the
   // condition code uses at the patched jump.
-  int delta = Assembler::GetCmpImmediateRawImmediate(instr);
+  int delta = arm::GetCmpImmediateRawImmediate(instr);
   delta +=
-      Assembler::GetCmpImmediateRegister(instr).code() * kOff12Mask;
+      arm::GetCmpImmediateRegister(instr).code() * arm::kOff12Mask;
+#else
+  Instr32 instr = Assembler::instr32_at(cmp_instruction_address);
+  if (!thumb32::IsCmpImmediate(instr)) {
+    return;
+  }
+  int delta = thumb32::GetCmpImmediateRawImmediate(instr);
+  delta +=
+      thumb32::GetCmpImmediateRegister(instr).code() * arm::kOff12Mask;
+#endif
+
   // If the delta is 0 the instruction is cmp r0, #0 which also signals that
   // nothing was inlined.
   if (delta == 0) {
@@ -1668,10 +1684,17 @@ void PatchInlinedSmiCode(Address address, InlinedSmiCheck check) {
 #endif
 
   Address patch_address =
-      cmp_instruction_address - delta * Instruction::kInstrSize;
+      cmp_instruction_address - delta * Assembler::kInstrSize;
+#ifndef USE_THUMB
   Instr instr_at_patch = Assembler::instr_at(patch_address);
   Instr branch_instr =
-      Assembler::instr_at(patch_address + Instruction::kInstrSize);
+      Assembler::instr_at(patch_address + Assembler::kInstrSize);
+#else
+  Instr32 instr_at_patch = Assembler::instr32_at(patch_address);
+  Instr32 branch_instr =
+      Assembler::instr32_at(patch_address + 2 * Assembler::kInstrSize);
+#endif
+
   // This is patching a conditional "jump if not smi/jump if smi" site.
   // Enabling by changing from
   //   cmp rx, rx
@@ -1680,25 +1703,45 @@ void PatchInlinedSmiCode(Address address, InlinedSmiCheck check) {
   //   tst rx, #kSmiTagMask
   //   b ne/eq, <target>
   // and vice-versa to be disabled again.
+#ifndef USE_THUMB
   CodePatcher patcher(patch_address, 2);
-  Register reg = Assembler::GetRn(instr_at_patch);
   if (check == ENABLE_INLINED_SMI_CHECK) {
-    ASSERT(Assembler::IsCmpRegister(instr_at_patch));
-    ASSERT_EQ(Assembler::GetRn(instr_at_patch).code(),
-              Assembler::GetRm(instr_at_patch).code());
+    ASSERT(arm::IsCmpRegister(instr_at_patch));
+    ASSERT_EQ(arm::GetRn(instr_at_patch).code(),
+              arm::GetRm(instr_at_patch).code());
+    Register reg = arm::GetRn(instr_at_patch);
     patcher.masm()->tst(reg, Operand(kSmiTagMask));
   } else {
     ASSERT(check == DISABLE_INLINED_SMI_CHECK);
-    ASSERT(Assembler::IsTstImmediate(instr_at_patch));
+    ASSERT(arm::IsTstImmediate(instr_at_patch));
+    Register reg = arm::GetRn(instr_at_patch);
     patcher.masm()->cmp(reg, reg);
   }
-  ASSERT(Assembler::IsBranch(branch_instr));
-  if (Assembler::GetCondition(branch_instr) == eq) {
-    patcher.EmitCondition(ne);
+  ASSERT(arm::IsBranch(branch_instr));
+  Condition cond = NegateCondition(arm::GetCondition(branch_instr));
+  ASSERT(cond == eq || cond == ne);
+  int offset = arm::GetBranchOffset(branch_instr);
+  patcher.masm()->b(offset, cond);
+#else // USE_THUMB
+  CodePatcher patcher(patch_address, 4);
+  if (check == ENABLE_INLINED_SMI_CHECK) {
+    ASSERT(thumb32::IsCmpRegister(instr_at_patch));
+    ASSERT_EQ(thumb32::GetCmpRegisterRn(instr_at_patch).code(),
+              thumb32::GetCmpRegisterRm(instr_at_patch).code());
+    Register reg = thumb32::GetCmpRegisterRn(instr_at_patch);
+    patcher.masm()->tst(reg, Operand(kSmiTagMask));
   } else {
-    ASSERT(Assembler::GetCondition(branch_instr) == ne);
-    patcher.EmitCondition(eq);
+    ASSERT(check == DISABLE_INLINED_SMI_CHECK);
+    ASSERT(thumb32::IsTstImmediate(instr_at_patch));
+    Register reg = thumb32::GetTstImmediateRegister(instr_at_patch);
+    patcher.masm()->cmp(reg, reg);
   }
+  ASSERT(thumb32::IsConditionalBranch(branch_instr));
+  Condition cond = NegateCondition(thumb32::GetBranchCondition(branch_instr));
+  ASSERT(cond == eq || cond == ne);
+  int offset = thumb32::GetBranchOffset(branch_instr);
+  patcher.masm()->b(offset, cond);
+#endif
 }
 
 

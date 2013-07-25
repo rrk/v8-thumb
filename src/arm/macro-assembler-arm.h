@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -90,7 +90,10 @@ class MacroAssembler: public Assembler {
   void Jump(Register target, Condition cond = al);
   void Jump(Address target, RelocInfo::Mode rmode, Condition cond = al);
   void Jump(Handle<Code> code, RelocInfo::Mode rmode, Condition cond = al);
-  static int CallSize(Register target, Condition cond = al);
+  void Jump(Register base, const Operand& x, Condition cond = al);
+  void Jump(const Operand& x, Condition cond = al);
+
+  int CallSize(Register target, Condition cond = al);
   void Call(Register target, Condition cond = al);
   int CallSize(Address target, RelocInfo::Mode rmode, Condition cond = al);
   static int CallSizeNotPredictableCodeSize(Address target,
@@ -108,8 +111,10 @@ class MacroAssembler: public Assembler {
             TypeFeedbackId ast_id = TypeFeedbackId::None(),
             Condition cond = al,
             TargetAddressStorageMode mode = CAN_INLINE_TARGET_ADDRESS);
-  void Ret(Condition cond = al);
+  void Call(Register base, const Operand& x, Condition cond = al);
+  void Call(const Operand& x, Condition cond = al);
 
+  void Ret(Condition cond = al);
   // Emit code to discard a non-negative number of pointer-sized elements
   // from the stack, clobbering only the sp register.
   void Drop(int count, Condition cond = al);
@@ -688,7 +693,7 @@ class MacroAssembler: public Assembler {
   // like some special IC code.
   static inline bool IsMarkedCode(Instr instr, int type) {
     ASSERT((FIRST_IC_MARKER <= type) && (type < LAST_CODE_MARKER));
-    return IsNop(instr, type);
+    return arm::IsNop(instr, type);
   }
 
 
@@ -1064,6 +1069,9 @@ class MacroAssembler: public Assembler {
   void SetCallCDoubleArguments(DwVfpRegister dreg1, DwVfpRegister dreg2);
   void SetCallCDoubleArguments(DwVfpRegister dreg, Register reg);
 
+  // Check stack alignment
+  void CheckStackAlignment();
+
   // Calls a C function and cleans up the space for arguments allocated
   // by PrepareCallCFunction. The called function is not allowed to trigger a
   // garbage collection, since that might move the code and invalidate the
@@ -1420,10 +1428,6 @@ class CodePatcher {
   // Emit an address directly.
   void Emit(Address addr);
 
-  // Emit the condition part of an instruction leaving the rest of the current
-  // instruction unchanged.
-  void EmitCondition(Condition cond);
-
  private:
   byte* address_;  // The address of the code being patched.
   int size_;  // Number of bytes of the expected patch size.
@@ -1453,6 +1457,8 @@ inline MemOperand GlobalObjectOperand()  {
 #define ACCESS_MASM(masm) masm->
 #endif
 
+
+typedef SizerImpl<MacroAssembler> MacroSizer;
 
 } }  // namespace v8::internal
 

@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -824,25 +824,34 @@ void MathExpGenerator::EmitMathExp(MacroAssembler* masm,
 
 #undef __
 
+#ifndef USE_THUMB
 // add(r0, pc, Operand(-8))
 static const uint32_t kCodeAgePatchFirstInstruction = 0xe24f0008;
+#else
+// mov  r0, pc
+// subs r0, 4
+static const uint32_t kCodeAgePatchFirstInstruction = 0x38044678;
+#endif
 
 static byte* GetNoCodeAgeSequence(uint32_t* length) {
   // The sequence of instructions that is patched out for aging code is the
   // following boilerplate stack-building prologue that is found in FUNCTIONS
   static bool initialized = false;
-  static uint32_t sequence[kNoCodeAgeSequenceLength];
-  byte* byte_sequence = reinterpret_cast<byte*>(sequence);
+  static byte sequence[kNoCodeAgeSequenceLength * Assembler::kInstrSize];
   *length = kNoCodeAgeSequenceLength * Assembler::kInstrSize;
   if (!initialized) {
-    CodePatcher patcher(byte_sequence, kNoCodeAgeSequenceLength);
+    CodePatcher patcher(sequence, kNoCodeAgeSequenceLength);
     PredictableCodeSizeScope scope(patcher.masm(), *length);
     patcher.masm()->stm(db_w, sp, r1.bit() | cp.bit() | fp.bit() | lr.bit());
     patcher.masm()->nop(ip.code());
+#ifdef USE_THUMB
+    // Need another 16bit nop here for the patch to fit
+    patcher.masm()->nop(ip.code());
+#endif
     patcher.masm()->add(fp, sp, Operand(2 * kPointerSize));
     initialized = true;
   }
-  return byte_sequence;
+  return sequence;
 }
 
 
@@ -863,8 +872,8 @@ void Code::GetCodeAgeAndParity(byte* sequence, Age* age,
     *parity = NO_MARKING_PARITY;
   } else {
     Address target_address = Memory::Address_at(
-        sequence + Assembler::kInstrSize * (kNoCodeAgeSequenceLength - 1));
-    Code* stub = GetCodeFromTargetAddress(target_address);
+        sequence + Assembler::kInstrSize * kNoCodeAgeSequenceLength - kPointerSize);
+    Code* stub = GetCodeFromTargetAddress(CPU::DecodePcAddress(target_address));
     GetCodeAgeAndParity(stub, age, parity);
   }
 }
@@ -881,9 +890,19 @@ void Code::PatchPlatformCodeAge(byte* sequence,
   } else {
     Code* stub = GetCodeAgeStub(age, parity);
     CodePatcher patcher(sequence, young_length / Assembler::kInstrSize);
+    PredictableCodeSizeScope scope(patcher.masm(), young_length);
+#ifndef USE_THUMB
     patcher.masm()->add(r0, pc, Operand(-8));
     patcher.masm()->ldr(pc, MemOperand(pc, -4));
-    patcher.masm()->dd(reinterpret_cast<uint32_t>(stub->instruction_start()));
+#else
+    // Give the assember permission to use all small instructions.
+    // All registers and literals below never vary, so everything is predictable anyway.
+    patcher.masm()->set_predictable_code_size(false);
+    patcher.masm()->mov(r0, pc); // 16bit
+    patcher.masm()->sub(r0, r0, Operand(4), SetCC); // 16bit
+    patcher.masm()->ldr(pc, MemOperand(pc, 0 + patcher.masm()->pc_mod(4))); // 32bit
+#endif
+    patcher.masm()->dd(reinterpret_cast<int32_t>(CPU::EncodePcAddress(stub->instruction_start())));
   }
 }
 

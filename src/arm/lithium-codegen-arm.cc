@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -162,6 +162,9 @@ bool LCodeGen::GeneratePrologue() {
       // for code aging to work properly.
       __ stm(db_w, sp, r1.bit() | cp.bit() | fp.bit() | lr.bit());
       __ nop(ip.code());
+#ifdef USE_THUMB
+      __ nop(ip.code());
+#endif
       // Adjust FP to point to saved FP.
       __ add(fp, sp, Operand(2 * kPointerSize));
     }
@@ -354,7 +357,6 @@ bool LCodeGen::GenerateDeoptJumpTable() {
       Comment(";;; jump table entry %d: deoptimization bailout %d.", i, id);
     }
     if (deopt_jump_table_[i].needs_frame) {
-      __ mov(ip, Operand(ExternalReference::ForDeoptEntry(entry)));
       if (needs_frame.is_bound()) {
         __ b(&needs_frame);
       } else {
@@ -367,12 +369,10 @@ bool LCodeGen::GenerateDeoptJumpTable() {
         __ mov(scratch0(), Operand(Smi::FromInt(StackFrame::STUB)));
         __ push(scratch0());
         __ add(fp, sp, Operand(2 * kPointerSize));
-        __ mov(lr, Operand(pc), LeaveCC, al);
-        __ mov(pc, ip);
+        __ Call(entry, RelocInfo::RUNTIME_ENTRY);
       }
     } else {
-      __ mov(lr, Operand(pc), LeaveCC, al);
-      __ mov(pc, Operand(ExternalReference::ForDeoptEntry(entry)));
+      __ Call(entry, RelocInfo::RUNTIME_ENTRY);
     }
     masm()->CheckConstPool(false, false);
   }
@@ -2681,16 +2681,21 @@ void LCodeGen::DoInstanceOfKnownGlobal(LInstanceOfKnownGlobal* instr) {
     // We use Factory::the_hole_value() on purpose instead of loading from the
     // root array to force relocation to be able to later patch with
     // the cached map.
-    PredictableCodeSizeScope predictable(masm_, 5 * Assembler::kInstrSize);
+#ifndef USE_THUMB
+    const int kPatchSequenceDelta = 5;
+#else
+    const int kPatchSequenceDelta = 9;
+#endif
+    PredictableCodeSizeScope predictable(masm_, kPatchSequenceDelta * Assembler::kInstrSize);
     Handle<Cell> cell = factory()->NewCell(factory()->the_hole_value());
-    __ mov(ip, Operand(Handle<Object>(cell)));
+    __ mov(ip, Operand(Handle<Object>(cell))); // <-- patch site 1
     __ ldr(ip, FieldMemOperand(ip, PropertyCell::kValueOffset));
     __ cmp(map, Operand(ip));
     __ b(ne, &cache_miss);
     // We use Factory::the_hole_value() on purpose instead of loading from the
     // root array to force relocation to be able to later patch
     // with true or false.
-    __ mov(result, Operand(factory()->the_hole_value()));
+    __ mov(result, Operand(factory()->the_hole_value())); // <-- patch site 2
   }
   __ b(&done);
 
@@ -2741,20 +2746,45 @@ void LCodeGen::DoDeferredInstanceOfKnownGlobal(LInstanceOfKnownGlobal* instr,
   Register temp = ToRegister(instr->temp());
   ASSERT(temp.is(r4));
   __ LoadHeapObject(InstanceofStub::right(), instr->function());
+#ifndef USE_THUMB
   static const int kAdditionalDelta = 5;
+#else
+  static const int kAdditionalDelta = 9;
+#endif
   // Make sure that code size is predicable, since we use specific constants
   // offsets in the code to find embedded values..
-  PredictableCodeSizeScope predictable(masm_, 6 * Assembler::kInstrSize);
+#ifndef USE_THUMB
+  const int kCodeSizeDelta = 6;
+#else
+  const int kCodeSizeDelta = 11;
+#endif
+  PredictableCodeSizeScope predictable(masm_, kCodeSizeDelta * Assembler::kInstrSize);
   int delta = masm_->InstructionsGeneratedSince(map_check) + kAdditionalDelta;
   Label before_push_delta;
   __ bind(&before_push_delta);
   __ BlockConstPoolFor(kAdditionalDelta);
-  __ mov(temp, Operand(delta * kPointerSize));
+  __ mov(temp, Operand(delta * Assembler::kInstrSize));
   // The mov above can generate one or two instructions. The delta was computed
   // for two instructions, so we need to pad here in case of one instruction.
-  if (masm_->InstructionsGeneratedSince(&before_push_delta) != 2) {
-    ASSERT_EQ(1, masm_->InstructionsGeneratedSince(&before_push_delta));
+#ifdef DEBUG
+#  ifndef USE_THUMB
+  const int kMinMoveDelta = 1;
+#  else
+  const int kMinMoveDelta = 2;
+#  endif
+#endif
+
+#ifndef USE_THUMB
+  const int kMaxMoveDelta = 2;
+#else
+  const int kMaxMoveDelta = 4;
+#endif
+  if (masm_->InstructionsGeneratedSince(&before_push_delta) != kMaxMoveDelta) {
+    ASSERT_EQ(kMinMoveDelta, masm_->InstructionsGeneratedSince(&before_push_delta));
     __ nop();
+#ifdef USE_THUMB
+    __ nop();
+#endif
   }
   __ StoreToSafepointRegisterSlot(temp, temp);
   CallCodeGeneric(stub.GetCode(isolate()),
@@ -2833,7 +2863,7 @@ void LCodeGen::DoReturn(LReturn* instr) {
     __ add(sp, sp, Operand(reg, LSL, kPointerSizeLog2));
   }
 
-  __ Jump(lr);
+  __ Ret();
 
   if (no_frame_start != -1) {
     info_->AddNoFrameRange(no_frame_start, masm_->pc_offset());
@@ -5673,7 +5703,12 @@ void LCodeGen::DoStackCheck(LStackCheck* instr) {
     __ cmp(sp, Operand(ip));
     __ b(hs, &done);
     StackCheckStub stub;
-    PredictableCodeSizeScope predictable(masm_, 2 * Assembler::kInstrSize);
+#ifndef USE_THUMB
+    const int kCallSize = 2 * Assembler::kInstrSize;
+#else
+    const int kCallSize = 3 * Assembler::kInstrSize;
+#endif
+    PredictableCodeSizeScope predictable(masm_, kCallSize);
     CallCode(stub.GetCode(isolate()), RelocInfo::CODE_TARGET, instr);
     EnsureSpaceForLazyDeopt();
     last_lazy_deopt_pc_ = masm()->pc_offset();

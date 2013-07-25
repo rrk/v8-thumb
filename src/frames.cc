@@ -415,7 +415,7 @@ static bool GcSafeCodeContains(HeapObject* object, Address addr);
 void StackFrame::IteratePc(ObjectVisitor* v,
                            Address* pc_address,
                            Code* holder) {
-  Address pc = *pc_address;
+  Address pc = CPU::DecodePcAddress(*pc_address);
   ASSERT(GcSafeCodeContains(holder, pc));
   unsigned pc_offset = static_cast<unsigned>(pc - holder->instruction_start());
   Object* code = holder;
@@ -423,7 +423,7 @@ void StackFrame::IteratePc(ObjectVisitor* v,
   if (code != holder) {
     holder = reinterpret_cast<Code*>(code);
     pc = holder->instruction_start() + pc_offset;
-    *pc_address = pc;
+    *pc_address = CPU::EncodePcAddress(pc);
   }
 }
 
@@ -453,7 +453,7 @@ StackFrame::Type StackFrame::ComputeType(const StackFrameIteratorBase* iterator,
     // as nobody tries to GC...
     if (!iterator->can_access_heap_objects_) return JAVA_SCRIPT;
     Code::Kind kind = GetContainingCode(iterator->isolate(),
-                                        *(state->pc_address))->kind();
+                                        CPU::DecodePcAddress(*(state->pc_address)))->kind();
     ASSERT(kind == Code::FUNCTION || kind == Code::OPTIMIZED_FUNCTION);
     return (kind == Code::OPTIMIZED_FUNCTION) ? OPTIMIZED : JAVA_SCRIPT;
   }

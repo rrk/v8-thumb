@@ -44,9 +44,11 @@
 namespace v8 {
 namespace internal {
 
+
 // When running without a simulator we call the entry directly.
 #define CALL_GENERATED_CODE(entry, p0, p1, p2, p3, p4) \
   (entry(p0, p1, p2, p3, p4))
+
 
 typedef int (*arm_regexp_matcher)(String*, int, const byte*, const byte*,
                                   void*, int*, int, Address, int, Isolate*);
@@ -262,11 +264,11 @@ class Simulator {
   };
 
   // Unsupported instructions use Format to print an error and stop execution.
-  void Format(Instruction* instr, const char* format);
+  void Format(arm::Instruction* instr, const char* format);
 
   // Checks if the current instruction should be executed based on its
   // condition bits.
-  bool ConditionallyExecute(Instruction* instr);
+  bool ConditionallyExecute(arm::Instruction* instr);
 
   // Helper functions to set the conditional flags in the architecture state.
   void SetNZFlags(int32_t val);
@@ -289,19 +291,19 @@ class Simulator {
   inline double canonicalizeNaN(double value);
 
   // Helper functions to decode common "addressing" modes
-  int32_t GetShiftRm(Instruction* instr, bool* carry_out);
-  int32_t GetImm(Instruction* instr, bool* carry_out);
-  int32_t ProcessPU(Instruction* instr,
+  int32_t GetShiftRm(arm::Instruction* instr, bool* carry_out);
+  int32_t GetImm(arm::Instruction* instr, bool* carry_out);
+  int32_t ProcessPU(arm::Instruction* instr,
                     int num_regs,
                     int operand_size,
                     intptr_t* start_address,
                     intptr_t* end_address);
-  void HandleRList(Instruction* instr, bool load);
-  void HandleVList(Instruction* inst);
-  void SoftwareInterrupt(Instruction* instr);
+  void HandleRList(arm::Instruction* instr, bool load);
+  void HandleVList(arm::Instruction* inst);
+  void SoftwareInterrupt(arm::Instruction* instr);
 
   // Stop helper functions.
-  inline bool isStopInstruction(Instruction* instr);
+  inline bool isStopInstruction(arm::Instruction* instr);
   inline bool isWatchedStop(uint32_t bkpt_code);
   inline bool isEnabledStop(uint32_t bkpt_code);
   inline void EnableStop(uint32_t bkpt_code);
@@ -315,43 +317,43 @@ class Simulator {
   inline void WriteB(int32_t addr, uint8_t value);
   inline void WriteB(int32_t addr, int8_t value);
 
-  inline uint16_t ReadHU(int32_t addr, Instruction* instr);
-  inline int16_t ReadH(int32_t addr, Instruction* instr);
+  inline uint16_t ReadHU(int32_t addr, arm::Instruction* instr);
+  inline int16_t ReadH(int32_t addr, arm::Instruction* instr);
   // Note: Overloaded on the sign of the value.
-  inline void WriteH(int32_t addr, uint16_t value, Instruction* instr);
-  inline void WriteH(int32_t addr, int16_t value, Instruction* instr);
+  inline void WriteH(int32_t addr, uint16_t value, arm::Instruction* instr);
+  inline void WriteH(int32_t addr, int16_t value, arm::Instruction* instr);
 
-  inline int ReadW(int32_t addr, Instruction* instr);
-  inline void WriteW(int32_t addr, int value, Instruction* instr);
+  inline int ReadW(int32_t addr, arm::Instruction* instr);
+  inline void WriteW(int32_t addr, int value, arm::Instruction* instr);
 
   int32_t* ReadDW(int32_t addr);
   void WriteDW(int32_t addr, int32_t value1, int32_t value2);
 
   // Executing is handled based on the instruction type.
   // Both type 0 and type 1 rolled into one.
-  void DecodeType01(Instruction* instr);
-  void DecodeType2(Instruction* instr);
-  void DecodeType3(Instruction* instr);
-  void DecodeType4(Instruction* instr);
-  void DecodeType5(Instruction* instr);
-  void DecodeType6(Instruction* instr);
-  void DecodeType7(Instruction* instr);
+  void DecodeType01(arm::Instruction* instr);
+  void DecodeType2(arm::Instruction* instr);
+  void DecodeType3(arm::Instruction* instr);
+  void DecodeType4(arm::Instruction* instr);
+  void DecodeType5(arm::Instruction* instr);
+  void DecodeType6(arm::Instruction* instr);
+  void DecodeType7(arm::Instruction* instr);
 
   // Support for VFP.
-  void DecodeTypeVFP(Instruction* instr);
-  void DecodeType6CoprocessorIns(Instruction* instr);
-  void DecodeSpecialCondition(Instruction* instr);
+  void DecodeTypeVFP(arm::Instruction* instr);
+  void DecodeType6CoprocessorIns(arm::Instruction* instr);
+  void DecodeSpecialCondition(arm::Instruction* instr);
 
-  void DecodeVMOVBetweenCoreAndSinglePrecisionRegisters(Instruction* instr);
-  void DecodeVCMP(Instruction* instr);
-  void DecodeVCVTBetweenDoubleAndSingle(Instruction* instr);
-  void DecodeVCVTBetweenFloatingPointAndInteger(Instruction* instr);
+  void DecodeVMOVBetweenCoreAndSinglePrecisionRegisters(arm::Instruction* instr);
+  void DecodeVCMP(arm::Instruction* instr);
+  void DecodeVCVTBetweenDoubleAndSingle(arm::Instruction* instr);
+  void DecodeVCVTBetweenFloatingPointAndInteger(arm::Instruction* instr);
 
   // Executes one instruction.
-  void InstructionDecode(Instruction* instr);
+  void InstructionDecode(arm::Instruction* instr);
 
   // ICache.
-  static void CheckICache(v8::internal::HashMap* i_cache, Instruction* instr);
+  static void CheckICache(v8::internal::HashMap* i_cache, arm::Instruction* instr);
   static void FlushOnePage(v8::internal::HashMap* i_cache, intptr_t start,
                            int size);
   static CachePage* GetCachePage(v8::internal::HashMap* i_cache, void* page);
@@ -414,7 +416,7 @@ class Simulator {
   v8::internal::HashMap* i_cache_;
 
   // Registered breakpoints.
-  Instruction* break_pc_;
+  arm::Instruction* break_pc_;
   Instr break_instr_;
 
   v8::internal::Isolate* isolate_;

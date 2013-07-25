@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -2830,7 +2830,8 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
     if (frame_alignment > kPointerSize) {
       Label alignment_as_expected;
       ASSERT(IsPowerOf2(frame_alignment));
-      __ tst(sp, Operand(frame_alignment_mask));
+      __ mov(ip, sp);
+      __ tst(ip, Operand(frame_alignment_mask));
       __ b(eq, &alignment_as_expected);
       // Don't use Check here, as it will call Runtime_Abort re-entering here.
       __ stop("Unexpected alignment");
@@ -2845,14 +2846,25 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
   // know where the return address is. The CEntryStub is unmovable, so
   // we can store the address on the stack to be able to find it again and
   // we never have to restore it, because it will not change.
-  // Compute the return address in lr to return to after the jump below. Pc is
-  // already at '+ 8' from the current instruction but return is after three
-  // instructions so add another 4 to pc to get the return address.
+  // Compute the return address in lr to return to after the jump below.
   {
     // Prevent literal pool emission before return address.
     Assembler::BlockConstPoolScope block_const_pool(masm);
-    masm->add(lr, pc, Operand(4));
-    __ str(lr, MemOperand(sp, 0));
+    const int max_offset = 32; // 32 is just a large enough constant to ensure the real offset fits.
+    MacroSizer ___(masm);
+    ___.add(lr, pc, Operand(max_offset));
+    ___.str(lr, MemOperand(sp, 0));
+    ___.Jump(r5);
+
+    int lr_offset = ___.SizeOfCode() - Assembler::kPcLoadDelta;
+#ifdef USE_THUMB
+    lr_offset |= 1;
+#endif
+    ASSERT(lr_offset <= max_offset);
+    // We have to be very cafeful here. pc is going to be rounded down to 4.
+    // That is the CPU just masks the lower 2 bits.
+    masm->add(lr, pc, Operand(lr_offset + masm->pc_mod(4)));
+    masm->str(lr, MemOperand(sp, 0));
     masm->Jump(r5);
   }
 
@@ -2881,7 +2893,7 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
   // fp: frame pointer
   //  Callee-saved register r4 still holds argc.
   __ LeaveExitFrame(save_doubles_, r4);
-  __ mov(pc, lr);
+  __ Ret();
 
   // check if we should retry or throw exception
   Label retry;
@@ -2937,7 +2949,8 @@ void CEntryStub::Generate(MacroAssembler* masm) {
   // builtin once.
 
   // Compute the argv pointer in a callee-saved register.
-  __ add(r6, sp, Operand(r0, LSL, kPointerSizeLog2));
+  __ mov(r6, sp);
+  __ add(r6, r6, Operand(r0, LSL, kPointerSizeLog2));
   __ sub(r6, r6, Operand(kPointerSize));
 
   // Enter the exit frame that transitions from JavaScript to C++.
@@ -3061,7 +3074,6 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
 
   // Set up frame pointer for the frame to be pushed.
   __ add(fp, sp, Operand(-EntryFrameConstants::kCallerFPOffset));
-
   // If this is the outermost JS call, set js_entry_sp value.
   Label non_outermost_js;
   ExternalReference js_entry_sp(Isolate::kJSEntrySPAddress, isolate);
@@ -3136,15 +3148,8 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
   }
   __ ldr(ip, MemOperand(ip));  // deref address
 
-  // Branch and link to JSEntryTrampoline.  We don't use the double underscore
-  // macro for the add instruction because we don't want the coverage tool
-  // inserting instructions here after we read the pc. We block literal pool
-  // emission for the same reason.
-  {
-    Assembler::BlockConstPoolScope block_const_pool(masm);
-    __ mov(lr, Operand(pc));
-    masm->add(pc, ip, Operand(Code::kHeaderSize - kHeapObjectTag));
-  }
+  // Branch and link to JSEntryTrampoline.
+  __ Call(ip, Operand(Code::kHeaderSize - kHeapObjectTag));
 
   // Unlink this frame from the handler chain.
   __ PopTryHandler();
@@ -3206,7 +3211,14 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
   const Register inline_site = r9;
   const Register scratch = r2;
 
-  const int32_t kDeltaToLoadBoolResult = 4 * kPointerSize;
+
+  // The following delta is the distance from the "patch site 1" in
+  // LCodeGen::DoInstanceOfKnownGlobal() to "patch site 2".
+#ifndef USE_THUMB
+  const int32_t kDeltaToLoadBoolResult = 4 * Assembler::kInstrSize;
+#else
+  const int32_t kDeltaToLoadBoolResult = 7 * Assembler::kInstrSize;
+#endif
 
   Label slow, loop, is_instance, is_not_instance, not_js_object;
 
@@ -3252,7 +3264,13 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
     // The offset was stored in r4 safepoint slot.
     // (See LCodeGen::DoDeferredLInstanceOfKnownGlobal)
     __ LoadFromSafepointRegisterSlot(scratch, r4);
+#ifndef USE_THUMB
     __ sub(inline_site, lr, scratch);
+#else
+    // Need to mask off lower bit of lr because the caller was in thumb
+    __ bic(inline_site, lr, Operand(1));
+    __ sub(inline_site, inline_site, scratch);
+#endif
     // Get the map location in scratch and patch it.
     __ GetRelocatedValueLocation(inline_site, scratch);
     __ ldr(scratch, MemOperand(scratch));
@@ -3527,7 +3545,7 @@ void ArgumentsAccessStub::GenerateReadElement(MacroAssembler* masm) {
   __ sub(r3, r0, r1);
   __ add(r3, fp, Operand::PointerOffsetFromSmiKey(r3));
   __ ldr(r0, MemOperand(r3, kDisplacement));
-  __ Jump(lr);
+  __ Ret();
 
   // Arguments adaptor case: Check index against actual arguments
   // limit found in the arguments adaptor frame. Use unsigned
@@ -3541,7 +3559,7 @@ void ArgumentsAccessStub::GenerateReadElement(MacroAssembler* masm) {
   __ sub(r3, r0, r1);
   __ add(r3, r2, Operand::PointerOffsetFromSmiKey(r3));
   __ ldr(r0, MemOperand(r3, kDisplacement));
-  __ Jump(lr);
+  __ Ret();
 
   // Slow-case: Handle non-smi or out-of-bounds access to arguments
   // by calling the runtime system.
@@ -4578,7 +4596,7 @@ void CallConstructStub::Generate(MacroAssembler* masm) {
   __ ldr(jmp_reg, FieldMemOperand(r1, JSFunction::kSharedFunctionInfoOffset));
   __ ldr(jmp_reg, FieldMemOperand(jmp_reg,
                                   SharedFunctionInfo::kConstructStubOffset));
-  __ add(pc, jmp_reg, Operand(Code::kHeaderSize - kHeapObjectTag));
+  __ Jump(jmp_reg, Operand(Code::kHeaderSize - kHeapObjectTag));
 
   // r0: number of arguments
   // r1: called object
@@ -6195,13 +6213,22 @@ void DirectCEntryStub::GenerateCall(MacroAssembler* masm,
 
   // Push return address (accessible to GC through exit frame pc).
   // Note that using pc with str is deprecated.
+  //
+  const int max_offset = 32;
+  MacroSizer ___(masm);
+  ___.add(ip, pc, Operand(max_offset));
+  ___.str(ip, MemOperand(sp, 0));
+  ___.Jump(target);
+  int lr_offset = ___.SizeOfCode() - Assembler::kPcLoadDelta;
+#ifdef USE_THUMB
+  lr_offset |= 1;
+#endif
+  ASSERT(lr_offset <= max_offset);
   Label start;
   __ bind(&start);
-  __ add(ip, pc, Operand(Assembler::kInstrSize));
+  __ add(ip, pc, Operand(lr_offset + masm->pc_mod(4)));
   __ str(ip, MemOperand(sp, 0));
   __ Jump(target);  // Call the C++ function.
-  ASSERT_EQ(Assembler::kInstrSize + Assembler::kPcLoadDelta,
-            masm->SizeOfCodeGeneratedSince(&start));
   __ VFPEnsureFPSCRState(r2);
 }
 
@@ -6551,6 +6578,7 @@ bool CodeStub::CanUseFPRegisters() {
 // we keep the GC informed.  The word in the object where the value has been
 // written is in the address register.
 void RecordWriteStub::Generate(MacroAssembler* masm) {
+  PredictableCodeSizeScope(masm, -1);
   Label skip_to_incremental_noncompacting;
   Label skip_to_incremental_compacting;
 
@@ -6584,10 +6612,15 @@ void RecordWriteStub::Generate(MacroAssembler* masm) {
 
   // Initial mode of the stub is expected to be STORE_BUFFER_ONLY.
   // Will be checked in IncrementalMarking::ActivateGeneratedStub.
-  ASSERT(Assembler::GetBranchOffset(masm->instr_at(0)) < (1 << 12));
-  ASSERT(Assembler::GetBranchOffset(masm->instr_at(4)) < (1 << 12));
-  PatchBranchIntoNop(masm, 0);
-  PatchBranchIntoNop(masm, Assembler::kInstrSize);
+#ifndef USE_THUMB
+  ASSERT(arm::GetBranchOffset(masm->instr_at(kFirstInstructionOffset)) < (1 << 12));
+  ASSERT(arm::GetBranchOffset(masm->instr_at(kSecondInstructionOffset)) < (1 << 12));
+#else
+  ASSERT(thumb32::GetBranchOffset(masm->instr32_at(kFirstInstructionOffset)) < (1 << 12));
+  ASSERT(thumb32::GetBranchOffset(masm->instr32_at(kSecondInstructionOffset)) < (1 << 12));
+#endif
+  PatchBranchIntoNop(masm, kFirstInstructionOffset);
+  PatchBranchIntoNop(masm, kSecondInstructionOffset);
 }
 
 
@@ -6827,7 +6860,12 @@ void StubFailureTrampolineStub::Generate(MacroAssembler* masm) {
 
 void ProfileEntryHookStub::MaybeCallEntryHook(MacroAssembler* masm) {
   if (masm->isolate()->function_entry_hook() != NULL) {
-    PredictableCodeSizeScope predictable(masm, 4 * Assembler::kInstrSize);
+#ifndef USE_THUMB
+    const int kEntrySize = 4 * Assembler::kInstrSize;
+#else
+    const int kEntrySize = 7 * Assembler::kInstrSize;
+#endif
+    PredictableCodeSizeScope predictable(masm, kEntrySize);
     AllowStubCallsScope allow_stub_calls(masm, true);
     ProfileEntryHookStub stub;
     __ push(lr);
@@ -6839,8 +6877,14 @@ void ProfileEntryHookStub::MaybeCallEntryHook(MacroAssembler* masm) {
 
 void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
   // The entry hook is a "push lr" instruction, followed by a call.
+#ifndef USE_THUMB
   const int32_t kReturnAddressDistanceFromFunctionStart =
       3 * Assembler::kInstrSize;
+#else
+  const int32_t kReturnAddressDistanceFromFunctionStart =
+      5 * Assembler::kInstrSize;
+#endif
+
 
   // This should contain all kCallerSaved registers.
   const RegList kSavedRegs =
@@ -6861,6 +6905,12 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
   // Compute the function's address for the first argument.
   __ sub(r0, lr, Operand(kReturnAddressDistanceFromFunctionStart));
 
+#ifdef USE_THUMB
+  // The API expects the function entry point to be even (so that it
+  // doesn't look like an object). Strip the lower bit.
+  __ bic(r0, r0, Operand(1));
+#endif
+
   // The caller's return address is above the saved temporaries.
   // Grab that for the second argument to the hook.
   __ add(r1, sp, Operand(kNumSavedRegs * kPointerSize));
@@ -6870,7 +6920,9 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
   if (frame_alignment > kPointerSize) {
     __ mov(r5, sp);
     ASSERT(IsPowerOf2(frame_alignment));
-    __ and_(sp, sp, Operand(-frame_alignment));
+    __ mov(ip, sp);
+    __ and_(ip, ip, Operand(-frame_alignment));
+    __ mov(sp, ip);
   }
 
 #if V8_HOST_ARCH_ARM

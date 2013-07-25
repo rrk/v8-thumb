@@ -375,6 +375,8 @@ DEFINE_bool(enable_32dregs, ENABLE_32DREGS_DEFAULT,
             "enable use of d16-d31 registers on ARM - this requires VFP3")
 DEFINE_bool(enable_vldr_imm, false,
             "enable use of constant pools for double immediate (ARM only)")
+DEFINE_bool(enable_size_opt, false,
+            "Optimize for size (ARM only)")
 
 // bootstrapper.cc
 DEFINE_bool(enable_i18n, true, "enable i18n extension")

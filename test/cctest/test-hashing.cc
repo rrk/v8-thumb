@@ -35,7 +35,7 @@
 #include "code-stubs.h"
 #include "objects.h"
 
-#ifdef USE_SIMULATOR
+#if defined(V8_TARGET_ARCH_ARM) || defined(USE_SIMULATOR)
 #include "simulator.h"
 #endif
 
@@ -95,7 +95,7 @@ void generate(MacroAssembler* masm, i::Vector<const uint8_t> string) {
   }
   StringHelper::GenerateHashGetHash(masm, r0);
   __ pop(kRootRegister);
-  __ mov(pc, Operand(lr));
+  __ Ret();
 #elif V8_TARGET_ARCH_MIPS
   __ push(kRootRegister);
   __ InitializeRootRegister();
@@ -137,7 +137,7 @@ void generate(MacroAssembler* masm, uint32_t key) {
   __ mov(r0, Operand(key));
   __ GetNumberHash(r0, ip);
   __ pop(kRootRegister);
-  __ mov(pc, Operand(lr));
+  __ Ret();
 #elif V8_TARGET_ARCH_MIPS
   __ push(kRootRegister);
   __ InitializeRootRegister();

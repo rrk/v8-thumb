@@ -641,7 +641,7 @@ DISABLE_ASAN void TickSample::Init(Isolate* isolate,
   top_frame_type = it.top_frame_type();
   int i = 0;
   while (!it.done() && i < TickSample::kMaxFramesCount) {
-    stack[i++] = it.frame()->pc();
+    stack[i++] = *(it.frame()->pc_address());
     it.Advance();
   }
   frames_count = i;

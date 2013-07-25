@@ -541,8 +541,18 @@ class FrameDescription {
   intptr_t GetTop() const { return top_; }
   void SetTop(intptr_t top) { top_ = top; }
 
-  intptr_t GetPc() const { return pc_; }
-  void SetPc(intptr_t pc) { pc_ = pc; }
+  intptr_t GetPc() const {
+    return CPU::DecodePc(pc_);
+  }
+  void SetPc(intptr_t pc) {
+    pc_ = CPU::EncodePc(pc);
+  }
+  intptr_t GetPcRaw() const {
+    return pc_;
+  }
+  void SetPcRaw(intptr_t pc) {
+    pc_ = pc;
+  }
 
   intptr_t GetFp() const { return fp_; }
   void SetFp(intptr_t fp) { fp_ = fp; }
@@ -553,7 +563,9 @@ class FrameDescription {
   Smi* GetState() const { return state_; }
   void SetState(Smi* state) { state_ = state; }
 
-  void SetContinuation(intptr_t pc) { continuation_ = pc; }
+  void SetContinuation(intptr_t pc) {
+    continuation_ = CPU::EncodePc(pc);
+  }
 
   StackFrame::Type GetFrameType() const { return type_; }
   void SetFrameType(StackFrame::Type type) { type_ = type; }

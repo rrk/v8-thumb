@@ -10736,6 +10736,10 @@ void Code::PrintExtraICState(FILE* out, Kind kind, ExtraICState extra) {
 
 
 void Code::Disassemble(const char* name, FILE* out) {
+#ifdef USE_THUMB
+  return; // XXX: no disas on thumb so far...
+#endif
+
   PrintF(out, "kind = %s\n", Kind2String(kind()));
   if (is_inline_cache_stub()) {
     PrintF(out, "ic_state = %s\n", ICState2String(ic_state()));

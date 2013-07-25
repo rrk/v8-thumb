@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -294,8 +294,7 @@ void Builtins::Generate_StringConstructCode(MacroAssembler* masm) {
 static void GenerateTailCallToSharedCode(MacroAssembler* masm) {
   __ ldr(r2, FieldMemOperand(r1, JSFunction::kSharedFunctionInfoOffset));
   __ ldr(r2, FieldMemOperand(r2, SharedFunctionInfo::kCodeOffset));
-  __ add(r2, r2, Operand(Code::kHeaderSize - kHeapObjectTag));
-  __ mov(pc, r2);
+  __ Jump(r2, Operand(Code::kHeaderSize - kHeapObjectTag));
 }
 
 
@@ -685,10 +684,9 @@ static void Generate_JSConstructStubHelper(MacroAssembler* masm,
     // Leave construct frame.
   }
 
-  __ add(sp, sp, Operand(r1, LSL, kPointerSizeLog2 - 1));
-  __ add(sp, sp, Operand(kPointerSize));
   __ IncrementCounter(isolate->counters()->constructed_objects(), 1, r1, r2);
-  __ Jump(lr);
+  __ add(sp, sp, Operand(r1, LSL, kPointerSizeLog2 - 1));
+  __ Ret(1);
 }
 
 
@@ -778,7 +776,7 @@ static void Generate_JSEntryTrampolineHelper(MacroAssembler* masm,
     // return.
     // Respect ABI stack constraint.
   }
-  __ Jump(lr);
+  __ Ret();
 
   // r0: result
 }
@@ -869,7 +867,7 @@ static void GenerateMakeCodeYoungAgainCommon(MacroAssembler* masm) {
   __ CallCFunction(
       ExternalReference::get_make_code_young_function(masm->isolate()), 1);
   __ ldm(ia_w, sp, r0.bit() | r1.bit() | fp.bit() | lr.bit());
-  __ mov(pc, r0);
+  __ Jump(r0);
 }
 
 #define DEFINE_CODE_AGE_BUILTIN_GENERATOR(C)                 \
@@ -897,9 +895,7 @@ void Builtins::Generate_NotifyStubFailure(MacroAssembler* masm) {
     __ CallRuntime(Runtime::kNotifyStubFailure, 0);
     __ ldm(ia_w, sp, kJSCallerSaved | kCalleeSaved);
   }
-
-  __ add(sp, sp, Operand(kPointerSize));  // Ignore state
-  __ mov(pc, lr);  // Jump to miss handler
+  __ Ret(1);
 }
 
 
@@ -920,15 +916,13 @@ static void Generate_NotifyDeoptimizedHelper(MacroAssembler* masm,
   Label with_tos_register, unknown_state;
   __ cmp(r6, Operand(FullCodeGenerator::NO_REGISTERS));
   __ b(ne, &with_tos_register);
-  __ add(sp, sp, Operand(1 * kPointerSize));  // Remove state.
-  __ Ret();
+  __ Ret(1);
 
   __ bind(&with_tos_register);
   __ ldr(r0, MemOperand(sp, 1 * kPointerSize));
   __ cmp(r6, Operand(FullCodeGenerator::TOS_REG));
   __ b(ne, &unknown_state);
-  __ add(sp, sp, Operand(2 * kPointerSize));  // Remove state.
-  __ Ret();
+  __ Ret(2);
 
   __ bind(&unknown_state);
   __ stop("no cases left");
@@ -1327,8 +1321,7 @@ void Builtins::Generate_FunctionApply(MacroAssembler* masm) {
                       NullCallWrapper(), CALL_AS_METHOD);
 
     frame_scope.GenerateLeaveFrame();
-    __ add(sp, sp, Operand(3 * kPointerSize));
-    __ Jump(lr);
+    __ Ret(3);
 
     // Invoke the function proxy.
     __ bind(&call_proxy);
@@ -1342,8 +1335,7 @@ void Builtins::Generate_FunctionApply(MacroAssembler* masm) {
 
     // Tear down the internal frame and remove function, receiver and args.
   }
-  __ add(sp, sp, Operand(3 * kPointerSize));
-  __ Jump(lr);
+  __ Ret(3);
 }
 
 
@@ -1466,7 +1458,7 @@ void Builtins::Generate_ArgumentsAdaptorTrampoline(MacroAssembler* masm) {
 
   // Exit frame and return.
   LeaveArgumentsAdaptorFrame(masm);
-  __ Jump(lr);
+  __ Ret();
 
 
   // -------------------------------------------

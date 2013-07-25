@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -283,6 +283,16 @@ class NumberToStringStub: public PlatformCodeStub {
 
 
 class RecordWriteStub: public PlatformCodeStub {
+  static const int kFirstInstructionOffset = 0;
+#ifndef USE_THUMB
+  static const int kSecondInstructionOffset = Assembler::kInstrSize;
+  static const int kSequenceSize      = 2*Assembler::kInstrSize;
+#else
+  static const int kSecondInstructionOffset = 2*Assembler::kInstrSize;
+  static const int kSequenceSize      = 4*Assembler::kInstrSize;
+#endif
+
+
  public:
   RecordWriteStub(Register object,
                   Register value,
@@ -309,35 +319,79 @@ class RecordWriteStub: public PlatformCodeStub {
   static void GenerateFixedRegStubsAheadOfTime(Isolate* isolate);
   virtual bool SometimesSetsUpAFrame() { return false; }
 
+#ifndef USE_THUMB
   static void PatchBranchIntoNop(MacroAssembler* masm, int pos) {
     masm->instr_at_put(pos, (masm->instr_at(pos) & ~B27) | (B24 | B20));
-    ASSERT(Assembler::IsTstImmediate(masm->instr_at(pos)));
+    ASSERT(arm::IsTstImmediate(masm->instr_at(pos)));
   }
 
   static void PatchNopIntoBranch(MacroAssembler* masm, int pos) {
     masm->instr_at_put(pos, (masm->instr_at(pos) & ~(B24 | B20)) | B27);
-    ASSERT(Assembler::IsBranch(masm->instr_at(pos)));
+    ASSERT(arm::IsBranch(masm->instr_at(pos)));
   }
 
   static Mode GetMode(Code* stub) {
-    Instr first_instruction = Assembler::instr_at(stub->instruction_start());
-    Instr second_instruction = Assembler::instr_at(stub->instruction_start() +
-                                                   Assembler::kInstrSize);
+    using namespace arm;
+    Instr first_instruction = Assembler::instr_at(stub->instruction_start() + kFirstInstructionOffset);
+    Instr second_instruction = Assembler::instr_at(stub->instruction_start() + kSecondInstructionOffset);
 
-    if (Assembler::IsBranch(first_instruction)) {
+    if (IsBranch(first_instruction)) {
       return INCREMENTAL;
     }
 
-    ASSERT(Assembler::IsTstImmediate(first_instruction));
+    ASSERT(IsTstImmediate(first_instruction));
 
-    if (Assembler::IsBranch(second_instruction)) {
+    if (IsBranch(second_instruction)) {
       return INCREMENTAL_COMPACTION;
     }
 
-    ASSERT(Assembler::IsTstImmediate(second_instruction));
+    ASSERT(IsTstImmediate(second_instruction));
 
     return STORE_BUFFER_ONLY;
   }
+#else
+  static void PatchBranchIntoNop(MacroAssembler* masm, int pos) {
+    using namespace thumb32;
+    Instr32 branch = masm->instr32_at(pos);
+    if (IsBranch(branch)) {
+      const int offset = GetBranchOffset(branch);
+      Instr32 nop = SetCmpImmediateRawImmediate(mod_imm::CMP, offset);
+      ASSERT(IsCmpImmediate(nop));
+      masm->instr32_at_put(pos, nop);
+    }
+  }
+
+  static void PatchNopIntoBranch(MacroAssembler* masm, int pos) {
+    using namespace thumb32;
+    Instr32 nop = masm->instr32_at(pos);
+    if (IsCmpImmediate(nop)) {
+      const int offset = GetCmpImmediateRawImmediate(nop);
+      Instr32 branch = SetBranchOffset(control::AL_B, offset);
+      ASSERT(IsBranch(branch));
+      masm->instr32_at_put(pos, branch);
+    }
+  }
+
+  static Mode GetMode(Code* stub) {
+    Instr32 first_instruction = Assembler::instr32_at(stub->instruction_start() + kFirstInstructionOffset);
+    Instr32 second_instruction = Assembler::instr32_at(stub->instruction_start() + kSecondInstructionOffset);
+
+    if (thumb32::IsBranch(first_instruction)) {
+      return INCREMENTAL;
+    }
+
+    ASSERT(thumb32::IsCmpImmediate(first_instruction));
+
+    if (thumb32::IsBranch(second_instruction)) {
+      return INCREMENTAL_COMPACTION;
+    }
+
+    ASSERT(thumb32::IsCmpImmediate(second_instruction));
+
+    return STORE_BUFFER_ONLY;
+  }
+#endif
+
 
   static void Patch(Code* stub, Mode mode) {
     MacroAssembler masm(NULL,
@@ -347,20 +401,21 @@ class RecordWriteStub: public PlatformCodeStub {
       case STORE_BUFFER_ONLY:
         ASSERT(GetMode(stub) == INCREMENTAL ||
                GetMode(stub) == INCREMENTAL_COMPACTION);
-        PatchBranchIntoNop(&masm, 0);
-        PatchBranchIntoNop(&masm, Assembler::kInstrSize);
+        PatchBranchIntoNop(&masm, kFirstInstructionOffset);
+        PatchBranchIntoNop(&masm, kSecondInstructionOffset);
         break;
       case INCREMENTAL:
         ASSERT(GetMode(stub) == STORE_BUFFER_ONLY);
-        PatchNopIntoBranch(&masm, 0);
+        PatchNopIntoBranch(&masm, kFirstInstructionOffset);
         break;
       case INCREMENTAL_COMPACTION:
         ASSERT(GetMode(stub) == STORE_BUFFER_ONLY);
-        PatchNopIntoBranch(&masm, Assembler::kInstrSize);
+        PatchNopIntoBranch(&masm, kSecondInstructionOffset);
         break;
     }
     ASSERT(GetMode(stub) == mode);
-    CPU::FlushICache(stub->instruction_start(), 2 * Assembler::kInstrSize);
+
+    CPU::FlushICache(stub->instruction_start() + kFirstInstructionOffset, kSequenceSize);
   }
 
  private:

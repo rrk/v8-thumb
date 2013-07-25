@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -180,7 +180,7 @@ void RegExpMacroAssemblerARM::Backtrack() {
   CheckPreemption();
   // Pop Code* offset from backtrack stack, add Code* and jump to location.
   Pop(r0);
-  __ add(pc, r0, Operand(code_pointer()));
+  __ Jump(r0, Operand(code_pointer()));
 }
 
 
@@ -937,13 +937,6 @@ void RegExpMacroAssemblerARM::PopRegister(int register_index) {
   __ str(r0, register_location(register_index));
 }
 
-
-static bool is_valid_memory_offset(int value) {
-  if (value < 0) value = -value;
-  return value < (1<<12);
-}
-
-
 void RegExpMacroAssemblerARM::PushBacktrack(Label* label) {
   if (label->is_bound()) {
     int target = label->pos();
@@ -951,23 +944,39 @@ void RegExpMacroAssemblerARM::PushBacktrack(Label* label) {
   } else {
     int constant_offset = GetBacktrackConstantPoolEntry();
     masm_->label_at_put(label, constant_offset);
-    // Reading pc-relative is based on the address 8 bytes ahead of
-    // the current opcode.
+    // Reading pc-relative is based on the address kPcLoadDelta bytes ahead of
+    // the current opcode. Also, on thumb pc is rounded down to 4.
     unsigned int offset_of_pc_register_read =
-      masm_->pc_offset() + Assembler::kPcLoadDelta;
+      (masm_->pc_offset() & ~3) + Assembler::kPcLoadDelta;
     int pc_offset_of_constant =
       constant_offset - offset_of_pc_register_read;
     ASSERT(pc_offset_of_constant < 0);
-    if (is_valid_memory_offset(pc_offset_of_constant)) {
+    PredictableCodeSizeScope(masm_, -1);
+    MacroSizer __s1(masm_);
+    {
+      Assembler::BlockConstPoolScope block_const_pool(&__s1);
+      __s1.ldr(r0, MemOperand(pc, pc_offset_of_constant));
+    }
+    if (__s1.SizeOfCode() == 4) {
       Assembler::BlockConstPoolScope block_const_pool(masm_);
       __ ldr(r0, MemOperand(pc, pc_offset_of_constant));
     } else {
-      // Not a 12-bit offset, so it needs to be loaded from the constant
-      // pool.
-      Assembler::BlockConstPoolScope block_const_pool(masm_);
-      __ mov(r0, Operand(pc_offset_of_constant + Assembler::kInstrSize));
+      MacroSizer __s2(masm_);
+      {
+        Assembler::BlockConstPoolScope block_const_pool(&__s2);
+        // Predictable size mode should make this a load from constant pool,
+        // but we want to verify that..
+        __s2.mov(r0, Operand(pc_offset_of_constant));
+      }
+      ASSERT(__s2.SizeOfCode() == 4);
+
+      Assembler::BlockConstPoolScope block_const_pool2(masm_);
+      __ mov(r0, Operand(pc_offset_of_constant + __s2.SizeOfCode()));
       __ ldr(r0, MemOperand(pc, r0));
     }
+#ifdef USE_THUMB
+    __ mov(r0, Operand(r0, ROR, 16));
+#endif
   }
   Push(r0);
   CheckStackLimit();
@@ -1202,7 +1211,13 @@ void RegExpMacroAssemblerARM::BranchOrBacktrack(Condition condition,
     return;
   }
   if (to == NULL) {
+#ifndef USE_THUMB
     __ b(condition, &backtrack_label_);
+#else
+    // Use longer condition jumping sequence (it + b) on thumb, since the backtrack label
+    // can be pretty far.
+    __ b_long(condition, &backtrack_label_);
+#endif
     return;
   }
   __ b(condition, to);
@@ -1216,7 +1231,7 @@ void RegExpMacroAssemblerARM::SafeCall(Label* to, Condition cond) {
 
 void RegExpMacroAssemblerARM::SafeReturn() {
   __ pop(lr);
-  __ add(pc, lr, Operand(masm_->CodeObject()));
+  __ Jump(lr, Operand(masm_->CodeObject()));
 }
 
 
@@ -1239,7 +1254,6 @@ void RegExpMacroAssemblerARM::Pop(Register target) {
   __ ldr(target,
          MemOperand(backtrack_stackpointer(), kPointerSize, PostIndex));
 }
-
 
 void RegExpMacroAssemblerARM::CheckPreemption() {
   // Check for preemption.

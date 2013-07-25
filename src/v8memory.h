@@ -44,6 +44,10 @@ class Memory {
     return *reinterpret_cast<uint16_t*>(addr);
   }
 
+  static int16_t& int16_at(Address addr)  {
+    return *reinterpret_cast<int16_t*>(addr);
+  }
+
   static uint32_t& uint32_at(Address addr)  {
     return *reinterpret_cast<uint32_t*>(addr);
   }

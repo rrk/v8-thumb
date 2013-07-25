@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -53,13 +53,18 @@ MacroAssembler::MacroAssembler(Isolate* arg_isolate, void* buffer, int size)
 
 
 void MacroAssembler::Jump(Register target, Condition cond) {
+#  ifdef USE_THUMB
+  orr(ip, target, Operand(1), LeaveCC, cond);
+  bx(ip, cond);
+#  else
   bx(target, cond);
+#  endif
 }
 
 
 void MacroAssembler::Jump(intptr_t target, RelocInfo::Mode rmode,
                           Condition cond) {
-  mov(ip, Operand(target, rmode));
+  mov(ip, Operand(target, rmode), LeaveCC, cond);
   bx(ip, cond);
 }
 
@@ -74,14 +79,20 @@ void MacroAssembler::Jump(Address target, RelocInfo::Mode rmode,
 void MacroAssembler::Jump(Handle<Code> code, RelocInfo::Mode rmode,
                           Condition cond) {
   ASSERT(RelocInfo::IsCodeTarget(rmode));
-  // 'code' is always generated ARM code, never THUMB code
   AllowDeferredHandleDereference embedding_raw_address;
   Jump(reinterpret_cast<intptr_t>(code.location()), rmode, cond);
 }
 
 
 int MacroAssembler::CallSize(Register target, Condition cond) {
-  return kInstrSize;
+  Sizer ___(this);
+#ifdef USE_THUMB
+  ___.orr(ip, target, Operand(1), LeaveCC, cond);
+  ___.blx(ip, cond);
+#else
+  ___.blx(target, cond);
+#endif
+  return ___.SizeOfCode();
 }
 
 
@@ -90,32 +101,31 @@ void MacroAssembler::Call(Register target, Condition cond) {
   BlockConstPoolScope block_const_pool(this);
   Label start;
   bind(&start);
+#ifdef USE_THUMB
+  orr(ip, target, Operand(1), LeaveCC, cond);
+  blx(ip, cond);
+#else
   blx(target, cond);
+#endif
   ASSERT_EQ(CallSize(target, cond), SizeOfCodeGeneratedSince(&start));
 }
 
 
 int MacroAssembler::CallSize(
     Address target, RelocInfo::Mode rmode, Condition cond) {
-  int size = 2 * kInstrSize;
-  Instr mov_instr = cond | MOV | LeaveCC;
-  intptr_t immediate = reinterpret_cast<intptr_t>(target);
-  if (!Operand(immediate, rmode).is_single_instruction(this, mov_instr)) {
-    size += kInstrSize;
-  }
-  return size;
+  Sizer ___(this);
+  ___.mov(ip, Operand(reinterpret_cast<int32_t>(target), rmode), LeaveCC, cond);
+  ___.blx(ip, cond);
+  return ___.SizeOfCode();
 }
 
 
 int MacroAssembler::CallSizeNotPredictableCodeSize(
     Address target, RelocInfo::Mode rmode, Condition cond) {
-  int size = 2 * kInstrSize;
-  Instr mov_instr = cond | MOV | LeaveCC;
-  intptr_t immediate = reinterpret_cast<intptr_t>(target);
-  if (!Operand(immediate, rmode).is_single_instruction(NULL, mov_instr)) {
-    size += kInstrSize;
-  }
-  return size;
+  Sizer ___;
+  ___.mov(ip, Operand(reinterpret_cast<int32_t>(target), rmode), LeaveCC, cond);
+  ___.blx(ip, cond);
+  return ___.SizeOfCode();
 }
 
 
@@ -150,7 +160,7 @@ void MacroAssembler::Call(Address target,
   // we have to do it explicitly.
   positions_recorder()->WriteRecordedPositions();
 
-  mov(ip, Operand(reinterpret_cast<int32_t>(target), rmode));
+  mov(ip, Operand(reinterpret_cast<int32_t>(target), rmode), LeaveCC, cond);
   blx(ip, cond);
 
   ASSERT_EQ(CallSize(target, rmode, cond), SizeOfCodeGeneratedSince(&start));
@@ -188,7 +198,32 @@ void MacroAssembler::Call(Handle<Code> code,
 
 
 void MacroAssembler::Ret(Condition cond) {
+#if defined(USE_THUMB) && defined(DEBUG)
+  if (!predictable_code_size()) {
+    // Verify that lr contains a sane value
+    Label skip;
+    if (cond != al) {
+      b(NegateCondition(cond), &skip);
+    }
+    Label ok1, ok2;
+    tst(lr, Operand(1));
+    b(ne, &ok1);
+    stop("target not thumb");
+    bind(&ok1);
+    bx(lr);
+    bind(&skip);
+    if (cond != al) {
+      tst(lr, Operand(1));
+      b(ne, &ok2);
+      stop("target not thumb");
+      bind(&ok2);
+    }
+  } else {
+    bx(lr, cond);
+  }
+#else
   bx(lr, cond);
+#endif
 }
 
 
@@ -250,22 +285,57 @@ void MacroAssembler::Move(DwVfpRegister dst, DwVfpRegister src) {
   }
 }
 
+void MacroAssembler::Call(Register base, const Operand& x, Condition cond) {
+  add(ip, base, x, LeaveCC, cond);
+  Call(ip, cond);
+}
+
+void MacroAssembler::Jump(Register base, const Operand& x, Condition cond) {
+  add(ip, base, x, LeaveCC, cond);
+  Jump(ip, cond);
+}
+
+void MacroAssembler::Call(const Operand& x, Condition cond) {
+  if (x.is_reg()) {
+    Call(x.rm(), cond);
+  } else if (!x.rm().is_valid()) {
+    Call(Address(x.immediate()), x.rmode(), cond);
+  } else {
+    UNIMPLEMENTED();
+  }
+}
+
+void MacroAssembler::Jump(const Operand& x, Condition cond) {
+  if (x.is_reg()) {
+    Jump(x.rm(), cond);
+  } else if (!x.rm().is_valid()) {
+    Jump(Address(x.immediate()), x.rmode(), cond);
+  } else {
+    UNIMPLEMENTED();
+  }
+}
 
 void MacroAssembler::And(Register dst, Register src1, const Operand& src2,
                          Condition cond) {
-  if (!src2.is_reg() &&
-      !src2.must_output_reloc_info(this) &&
-      src2.immediate() == 0) {
-    mov(dst, Operand::Zero(), LeaveCC, cond);
-  } else if (!src2.is_single_instruction(this) &&
-             !src2.must_output_reloc_info(this) &&
-             CpuFeatures::IsSupported(ARMv7) &&
-             IsPowerOf2(src2.immediate() + 1)) {
-    ubfx(dst, src1, 0,
-        WhichPowerOf2(static_cast<uint32_t>(src2.immediate()) + 1), cond);
-  } else {
-    and_(dst, src1, src2, LeaveCC, cond);
+  if (!src2.rm().is_valid()) {
+    if (!src2.must_output_reloc_info(this) &&
+        src2.immediate() == 0) {
+      mov(dst, Operand::Zero(), LeaveCC, cond);
+      return;
+    } else
+      if (!src2.must_output_reloc_info(this) &&
+          CpuFeatures::IsSupported(ARMv7) &&
+          IsPowerOf2(src2.immediate() + 1)) {
+        Sizer ___(this);
+        ___.and_(dst, src1, src2, LeaveCC, cond);
+        if (___.SizeOfCode() > 4) {
+          ubfx(dst, src1, 0,
+              WhichPowerOf2(static_cast<uint32_t>(src2.immediate()) + 1), cond);
+          return;
+        }
+      }
   }
+  and_(dst, src1, src2, LeaveCC, cond);
 }
 
 
@@ -958,15 +1028,17 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
   // Reserve place for the return address and stack space and align the frame
   // preparing for calling the runtime function.
   const int frame_alignment = MacroAssembler::ActivationFrameAlignment();
-  sub(sp, sp, Operand((stack_space + 1) * kPointerSize));
+  mov(ip, sp);
+  sub(ip, ip, Operand((stack_space + 1) * kPointerSize));
   if (frame_alignment > 0) {
     ASSERT(IsPowerOf2(frame_alignment));
-    and_(sp, sp, Operand(-frame_alignment));
+    and_(ip, ip, Operand(-frame_alignment));
   }
+  mov(sp, ip);
 
   // Set the exit frame sp value to point just before the return address
   // location.
-  add(ip, sp, Operand(kPointerSize));
+  add(ip, ip, Operand(kPointerSize));
   str(ip, MemOperand(fp, ExitFrameConstants::kSPOffset));
 }
 
@@ -1358,7 +1430,7 @@ void MacroAssembler::JumpToHandlerEntry() {
   mov(r2, Operand(r2, LSR, StackHandler::kKindWidth));  // Handler index.
   ldr(r2, MemOperand(r3, r2, LSL, kPointerSizeLog2));  // Smi-tagged offset.
   add(r1, r1, Operand(Code::kHeaderSize - kHeapObjectTag));  // Code start.
-  add(pc, r1, Operand::SmiUntag(r2));  // Jump
+  Jump(r1, Operand::SmiUntag(r2));  // Jump
 }
 
 
@@ -1669,8 +1741,16 @@ void MacroAssembler::Allocate(int object_size,
   Register topaddr = scratch1;
   Register obj_size_reg = scratch2;
   mov(topaddr, Operand(allocation_top));
+
+  bool use_obj_size_reg = false;
   Operand obj_size_operand = Operand(object_size);
-  if (!obj_size_operand.is_single_instruction(this)) {
+  {
+    Sizer ___(this);
+    ___.add(scratch2, result, obj_size_operand, SetCC);
+    use_obj_size_reg = ___.IsKilled(ip);
+  }
+
+  if (use_obj_size_reg) {
     // We are about to steal IP, so we need to load this value first
     mov(obj_size_reg, obj_size_operand);
   }
@@ -1708,12 +1788,12 @@ void MacroAssembler::Allocate(int object_size,
 
   // Calculate new top and bail out if new space is exhausted. Use result
   // to calculate the new top.
-  if (obj_size_operand.is_single_instruction(this)) {
-    // We can add the size as an immediate
-    add(scratch2, result, obj_size_operand, SetCC);
-  } else {
+  if (use_obj_size_reg) {
     // Doesn't fit in an immediate, we have to use the register
     add(scratch2, result, obj_size_reg, SetCC);
+  } else {
+    // We can add the size as an immediate
+    add(scratch2, result, obj_size_operand, SetCC);
   }
   b(cs, gc_required);
   cmp(scratch2, Operand(ip));
@@ -2357,7 +2437,7 @@ void MacroAssembler::CallApiFunctionAndReturn(ExternalReference function,
   // LeaveExitFrame expects unwind space to be in a register.
   mov(r4, Operand(stack_space));
   LeaveExitFrame(false, r4);
-  mov(pc, lr);
+  Ret();
 
   bind(&promote_scheduled_exception);
   TailCallExternalReference(
@@ -3322,9 +3402,10 @@ void MacroAssembler::PrepareCallCFunction(int num_reg_arguments,
     // Make stack end at alignment and make room for num_arguments - 4 words
     // and the original value of sp.
     mov(scratch, sp);
-    sub(sp, sp, Operand((stack_passed_arguments + 1) * kPointerSize));
+    sub(ip, scratch,  Operand((stack_passed_arguments + 1) * kPointerSize));
     ASSERT(IsPowerOf2(frame_alignment));
-    and_(sp, sp, Operand(-frame_alignment));
+    and_(ip, ip, Operand(-frame_alignment));
+    mov(sp, ip);
     str(scratch, MemOperand(sp, stack_passed_arguments * kPointerSize));
   } else {
     sub(sp, sp, Operand(stack_passed_arguments * kPointerSize));
@@ -3380,6 +3461,7 @@ void MacroAssembler::SetCallCDoubleArguments(DwVfpRegister dreg,
 void MacroAssembler::CallCFunction(ExternalReference function,
                                    int num_reg_arguments,
                                    int num_double_arguments) {
+  CheckStackAlignment();
   mov(ip, Operand(function));
   CallCFunctionHelper(ip, num_reg_arguments, num_double_arguments);
 }
@@ -3388,6 +3470,7 @@ void MacroAssembler::CallCFunction(ExternalReference function,
 void MacroAssembler::CallCFunction(Register function,
                                    int num_reg_arguments,
                                    int num_double_arguments) {
+  CheckStackAlignment();
   CallCFunctionHelper(function, num_reg_arguments, num_double_arguments);
 }
 
@@ -3403,11 +3486,7 @@ void MacroAssembler::CallCFunction(Register function,
   CallCFunction(function, num_arguments, 0);
 }
 
-
-void MacroAssembler::CallCFunctionHelper(Register function,
-                                         int num_reg_arguments,
-                                         int num_double_arguments) {
-  ASSERT(has_frame());
+void MacroAssembler::CheckStackAlignment() {
   // Make sure that the stack is aligned before calling a C function unless
   // running in the simulator. The simulator has its own alignment check which
   // provides more information.
@@ -3418,7 +3497,8 @@ void MacroAssembler::CallCFunctionHelper(Register function,
     if (frame_alignment > kPointerSize) {
       ASSERT(IsPowerOf2(frame_alignment));
       Label alignment_as_expected;
-      tst(sp, Operand(frame_alignment_mask));
+      mov(ip, sp);
+      tst(ip, Operand(frame_alignment_mask));
       b(eq, &alignment_as_expected);
       // Don't use Check here, as it will call Runtime_Abort possibly
       // re-entering here.
@@ -3427,7 +3507,13 @@ void MacroAssembler::CallCFunctionHelper(Register function,
     }
   }
 #endif
+}
 
+
+void MacroAssembler::CallCFunctionHelper(Register function,
+                                         int num_reg_arguments,
+                                         int num_double_arguments) {
+  ASSERT(has_frame());
   // Just call directly. The function called cannot cause a GC, or
   // allow preemption, so the return address in the link register
   // stays correct.
@@ -3441,16 +3527,16 @@ void MacroAssembler::CallCFunctionHelper(Register function,
   }
 }
 
-
+#ifndef USE_THUMB
 void MacroAssembler::GetRelocatedValueLocation(Register ldr_location,
                                Register result) {
   const uint32_t kLdrOffsetMask = (1 << 12) - 1;
-  const int32_t kPCRegOffset = 2 * kPointerSize;
+  const int32_t kPCRegOffset = Assembler::kPcLoadDelta;
   ldr(result, MemOperand(ldr_location));
   if (emit_debug_code()) {
     // Check that the instruction is a ldr reg, [pc + offset] .
-    and_(result, result, Operand(kLdrPCPattern));
-    cmp(result, Operand(kLdrPCPattern));
+    and_(result, result, Operand(arm::kLdrPCPattern));
+    cmp(result, Operand(arm::kLdrPCPattern));
     Check(eq, "The instruction to patch should be a load from pc.");
     // Result was clobbered. Restore it.
     ldr(result, MemOperand(ldr_location));
@@ -3460,6 +3546,33 @@ void MacroAssembler::GetRelocatedValueLocation(Register ldr_location,
   add(result, ldr_location, Operand(result));
   add(result, result, Operand(kPCRegOffset));
 }
+#else // USE_THUMB
+void MacroAssembler::GetRelocatedValueLocation(Register ldr_location,
+                               Register result) {
+  using namespace thumb32::mem;
+  const Instr32 kLdrPcMask = swap32(Instr32(LDR_PC_POSITIVE_MASK));
+  const Instr32 kLdrPcPattern = swap32(Instr32(LDR_PC_POSITIVE));
+
+  if (emit_debug_code()) {
+    ldr(result, MemOperand(ldr_location));
+    // Check that the instruction is a ldr reg, [pc + offset],
+    // we also assume the offset is positive (i.e. a constant pool entry).
+    and_(result, result, Operand(kLdrPcMask));
+    cmp(result, Operand(kLdrPcPattern));
+    Check(eq, "The instruction to patch should be a load from pc.");
+    // Result was clobbered. Restore it.
+  }
+  // Get the address of the constant.
+  // Load the second halfword of the instruction
+  // (we assume that the offset is always poisitive, so we don't need the U bit).
+  ldrh(result, MemOperand(ldr_location, kInstrSize));
+  and_(result, result, Operand(LDR_PC_OFFSET_MASK));
+  // PC is mod 4, so mask the lower 2 bits.
+  bic(ip, ldr_location, Operand(3));
+  add(result, result, ip);
+  add(result, result, Operand(kPcLoadDelta));
+}
+#endif
 
 
 void MacroAssembler::CheckPageFlag(
@@ -3808,6 +3921,7 @@ CodePatcher::CodePatcher(byte* address, int instructions)
   // The size is adjusted with kGap on order for the assembler to generate size
   // bytes of instructions without failing with buffer size constraints.
   ASSERT(masm_.reloc_info_writer.pos() == address_ + size_ + Assembler::kGap);
+  masm_.set_predictable_code_size(true);
 }
 
 
@@ -3829,14 +3943,6 @@ void CodePatcher::Emit(Instr instr) {
 void CodePatcher::Emit(Address addr) {
   masm()->emit(reinterpret_cast<Instr>(addr));
 }
-
-
-void CodePatcher::EmitCondition(Condition cond) {
-  Instr instr = Assembler::instr_at(masm_.pc_);
-  instr = (instr & ~kCondMask) | cond;
-  masm_.emit(instr);
-}
-
 
 } }  // namespace v8::internal
 

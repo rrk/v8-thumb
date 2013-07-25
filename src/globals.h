@@ -322,12 +322,20 @@ inline void USE(T) { }
   (reinterpret_cast<v8::internal::Address>(reinterpret_cast<intptr_t>(f)))
 
 
+
 // FUNCTION_CAST<F>(addr) casts an address into a function
 // of type F. Used to invoke generated code from within C.
+#if defined(V8_TARGET_ARCH_ARM) && defined(USE_THUMB)
+template <typename F>
+F FUNCTION_CAST(Address addr) {
+  return reinterpret_cast<F>(reinterpret_cast<intptr_t>(addr) | 1);
+}
+#else
 template <typename F>
 F FUNCTION_CAST(Address addr) {
   return reinterpret_cast<F>(reinterpret_cast<intptr_t>(addr));
 }
+#endif
 
 
 #if __cplusplus >= 201103L

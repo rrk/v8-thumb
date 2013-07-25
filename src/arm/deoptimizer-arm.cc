@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -35,12 +35,22 @@
 namespace v8 {
 namespace internal {
 
+// With USE_THUMB it's the same size
 const int Deoptimizer::table_entry_size_ = 12;
 
 
 int Deoptimizer::patch_size() {
-  const int kCallInstructionSizeInWords = 3;
-  return kCallInstructionSizeInWords * Assembler::kInstrSize;
+  // Deopt patch is the following call:
+  // movw    ip, low
+  // movt    ip, high
+  // blx     ip
+  // See LCodeGen::EnsureSpaceForLazyDeopt()
+#ifndef USE_THUMB
+  const int kCallInstrs = 3; // 12 bytes
+#else
+  const int kCallInstrs = 5; // 10 bytes
+#endif
+  return kCallInstrs * Assembler::kInstrSize;
 }
 
 
@@ -70,7 +80,7 @@ void Deoptimizer::PatchCodeForDeoptimization(Isolate* isolate, Code* code) {
     ASSERT(call_size_in_bytes % Assembler::kInstrSize == 0);
     ASSERT(call_size_in_bytes <= patch_size());
     CodePatcher patcher(call_address, call_size_in_words);
-    patcher.masm()->Call(deopt_entry, RelocInfo::NONE32);
+    patcher.masm()->Call(CPU::EncodePcAddress(deopt_entry), RelocInfo::NONE32);
     ASSERT(prev_call_address == NULL ||
            call_address >= prev_call_address + patch_size());
     ASSERT(call_address + patch_size() <= code->instruction_end());
@@ -80,8 +90,6 @@ void Deoptimizer::PatchCodeForDeoptimization(Isolate* isolate, Code* code) {
   }
 }
 
-
-static const int32_t kBranchBeforeInterrupt =  0x5a000004;
 
 // The back edge bookkeeping code matches the pattern:
 //
@@ -99,6 +107,7 @@ static const int32_t kBranchBeforeInterrupt =  0x5a000004;
 //  e1 2f ff 3c       blx ip
 //  ok-label
 
+#ifndef USE_THUMB
 void Deoptimizer::PatchInterruptCodeAt(Code* unoptimized_code,
                                        Address pc_after,
                                        Code* interrupt_code,
@@ -135,15 +144,17 @@ void Deoptimizer::RevertInterruptCodeAt(Code* unoptimized_code,
   // Restore the original jump.
   CodePatcher patcher(pc_after - 3 * kInstrSize, 1);
   patcher.masm()->b(4 * kInstrSize, pl);  // ok-label is 4 instructions later.
-  ASSERT_EQ(kBranchBeforeInterrupt,
-            Memory::int32_at(pc_after - 3 * kInstrSize));
+#ifdef DEBUG
+  Instr branch = Assembler::instr_at(pc_after - 3 * kInstrSize);
+  ASSERT(arm::IsBranch(branch) && arm::GetCondition(branch) == pl);
+  ASSERT(arm::GetBranchOffset(branch) == 6 * Assembler::kInstrSize - Assembler::kPcLoadDelta);
+#endif
   // Restore the original call address.
   uint32_t interrupt_address_offset = Memory::uint16_at(pc_after -
       2 * kInstrSize) & 0xfff;
   Address interrupt_address_pointer = pc_after + interrupt_address_offset;
   Memory::uint32_at(interrupt_address_pointer) =
       reinterpret_cast<uint32_t>(interrupt_code->entry());
-
   interrupt_code->GetHeap()->incremental_marking()->RecordCodeTargetPatch(
       unoptimized_code, pc_after - 2 * kInstrSize, interrupt_code);
 }
@@ -155,29 +166,135 @@ bool Deoptimizer::InterruptCodeIsPatched(Code* unoptimized_code,
                                          Code* interrupt_code,
                                          Code* replacement_code) {
   static const int kInstrSize = Assembler::kInstrSize;
-  ASSERT(Memory::int32_at(pc_after - kInstrSize) == kBlxIp);
+  ASSERT(Memory::int32_at(pc_after - kInstrSize) == arm::kBlxIp);
 
   uint32_t interrupt_address_offset =
       Memory::uint16_at(pc_after - 2 * kInstrSize) & 0xfff;
   Address interrupt_address_pointer = pc_after + interrupt_address_offset;
 
-  if (Assembler::IsNop(Assembler::instr_at(pc_after - 3 * kInstrSize))) {
-    ASSERT(Assembler::IsLdrPcImmediateOffset(
+  if (arm::IsNop(Assembler::instr_at(pc_after - 3 * kInstrSize))) {
+    ASSERT(arm::IsLdrPcImmediateOffset(
         Assembler::instr_at(pc_after - 2 * kInstrSize)));
     ASSERT(reinterpret_cast<uint32_t>(replacement_code->entry()) ==
            Memory::uint32_at(interrupt_address_pointer));
     return true;
   } else {
-    ASSERT(Assembler::IsLdrPcImmediateOffset(
+    ASSERT(arm::IsLdrPcImmediateOffset(
         Assembler::instr_at(pc_after - 2 * kInstrSize)));
-    ASSERT_EQ(kBranchBeforeInterrupt,
-              Memory::int32_at(pc_after - 3 * kInstrSize));
+    Instr branch = Assembler::instr_at(pc_after - 3 * kInstrSize);
+    ASSERT(arm::IsBranch(branch) && arm::GetCondition(branch) == pl);
+    ASSERT(arm::GetBranchOffset(branch) == 6 * Assembler::kInstrSize - Assembler::kPcLoadDelta);
     ASSERT(reinterpret_cast<uint32_t>(interrupt_code->entry()) ==
            Memory::uint32_at(interrupt_address_pointer));
     return false;
   }
 }
 #endif  // DEBUG
+
+#else // USE_THUMB
+
+void Deoptimizer::PatchInterruptCodeAt(Code* unoptimized_code,
+                                       Address pc_after,
+                                       Code* interrupt_code,
+                                       Code* replacement_code) {
+  ASSERT(!InterruptCodeIsPatched(unoptimized_code,
+                                 pc_after,
+                                 interrupt_code,
+                                 replacement_code));
+  // Turn the jump into nops.
+  CodePatcher patcher(pc_after - 5 * Assembler::kInstrSize, 2);
+  patcher.masm()->nop();
+  patcher.masm()->nop();
+  // Replace the call address.
+  Address ldr_pc_addr = pc_after - 3 * Assembler::kInstrSize;
+  Instr32 ldr_pc = Assembler::instr32_at(ldr_pc_addr);
+  ASSERT(thumb32::IsLdrPcImmediateOffset(ldr_pc));
+  int32_t interrupt_address_offset = thumb32::GetLdrRegisterImmediateOffset(ldr_pc);
+  Address interrupt_address_pointer = RoundDown(ldr_pc_addr, 4) + Assembler::kPcLoadDelta +
+    interrupt_address_offset;
+  Memory::int32_at(interrupt_address_pointer) =
+      CPU::EncodePc(reinterpret_cast<int32_t>(replacement_code->entry()));
+
+  ASSERT(InterruptCodeIsPatched(unoptimized_code,
+                                pc_after,
+                                interrupt_code,
+                                replacement_code));
+
+  unoptimized_code->GetHeap()->incremental_marking()->RecordCodeTargetPatch(
+      unoptimized_code, ldr_pc_addr, replacement_code);
+}
+
+
+void Deoptimizer::RevertInterruptCodeAt(Code* unoptimized_code,
+                                        Address pc_after,
+                                        Code* interrupt_code,
+                                        Code* replacement_code) {
+  ASSERT(InterruptCodeIsPatched(unoptimized_code,
+                                pc_after,
+                                interrupt_code,
+                                replacement_code));
+  // Restore the original jump.
+  CodePatcher patcher(pc_after - 5 * Assembler::kInstrSize, 2);
+  // We magically know that the jump goes to the 4th instructino after blx,
+  // which is 11 small instructions away from the bpl. See the code in
+  // FullCodeGenerator::EmitBackEdgeBookkeeping().
+  patcher.masm()->b(11 * Assembler::kInstrSize - Assembler::kPcLoadDelta, pl);
+#ifdef DEBUG
+  Instr32 branch = Assembler::instr32_at(pc_after - 5 * Assembler::kInstrSize);
+  ASSERT(thumb32::IsBranch(branch) && thumb32::GetBranchCondition(branch) == pl);
+  ASSERT(thumb32::GetBranchOffset(branch) == 11 * Assembler::kInstrSize - Assembler::kPcLoadDelta);
+#endif
+  // Restore the original call address.
+  Address ldr_pc_addr = pc_after - 3 * Assembler::kInstrSize;
+  Instr32 ldr_pc = Assembler::instr32_at(ldr_pc_addr);
+  ASSERT(thumb32::IsLdrPcImmediateOffset(ldr_pc));
+  int32_t interrupt_address_offset = thumb32::GetLdrRegisterImmediateOffset(ldr_pc);
+  Address interrupt_address_pointer = RoundDown(ldr_pc_addr, 4) + Assembler::kPcLoadDelta +
+    interrupt_address_offset;
+  Memory::uint32_at(interrupt_address_pointer) =
+      CPU::EncodePc(reinterpret_cast<int32_t>(interrupt_code->entry()));
+
+  ASSERT(!InterruptCodeIsPatched(unoptimized_code,
+                                 pc_after,
+                                 interrupt_code,
+                                 replacement_code));
+
+  interrupt_code->GetHeap()->incremental_marking()->RecordCodeTargetPatch(
+      unoptimized_code, ldr_pc_addr, interrupt_code);
+}
+
+
+#ifdef DEBUG
+bool Deoptimizer::InterruptCodeIsPatched(Code* unoptimized_code,
+                                         Address pc_after,
+                                         Code* interrupt_code,
+                                         Code* replacement_code) {
+  Instr16 blx_reg = Assembler::instr16_at(pc_after - Assembler::kInstrSize);
+  ASSERT(thumb16::IsBlxReg(blx_reg) && thumb16::GetBlxRegister(blx_reg).is(ip));
+
+  Address ldr_pc_addr = pc_after - 3 * Assembler::kInstrSize;
+  Instr32 ldr_pc = Assembler::instr32_at(ldr_pc_addr);
+  ASSERT(thumb32::IsLdrPcImmediateOffset(ldr_pc));
+  uint32_t interrupt_address_offset = thumb32::GetLdrRegisterImmediateOffset(ldr_pc);
+  Address interrupt_address_pointer = RoundDown(ldr_pc_addr, 4) + Assembler::kPcLoadDelta +
+    interrupt_address_offset;
+
+  if (thumb16::IsNop(Assembler::instr16_at(pc_after - 5 * Assembler::kInstrSize))) {
+    ASSERT(CPU::EncodePc(reinterpret_cast<int32_t>(replacement_code->entry())) ==
+           Memory::int32_at(interrupt_address_pointer));
+    return true;
+  } else {
+    Instr32 branch = Assembler::instr32_at(pc_after - 5 * Assembler::kInstrSize);
+    ASSERT(thumb32::IsConditionalBranch(branch) && thumb32::GetBranchCondition(branch) == pl);
+    ASSERT(thumb32::GetBranchOffset(branch) == 11 * Assembler::kInstrSize - Assembler::kPcLoadDelta);
+    ASSERT(CPU::EncodePc(reinterpret_cast<int32_t>(interrupt_code->entry())) ==
+           Memory::int32_at(interrupt_address_pointer));
+    return false;
+  }
+}
+#endif  // DEBUG
+
+#endif // USE_THUMB
 
 
 static int LookupBailoutId(DeoptimizationInputData* data, BailoutId ast_id) {
@@ -338,7 +455,7 @@ void Deoptimizer::DoComputeOsrOutputFrame() {
            ok ? "finished" : "aborted",
            reinterpret_cast<intptr_t>(function_));
     PrintFunctionName();
-    PrintF(" => pc=0x%0x]\n", output_[0]->GetPc());
+    PrintF(" => pc=0x%0x]\n", output_[0]->GetPcRaw());
   }
 }
 
@@ -422,9 +539,16 @@ void Deoptimizer::EntryGenerator::Generate() {
   __ vstm(db_w, sp, d0, d13);
 
   // Push all 16 registers (needed to populate FrameDescription::registers_).
-  // TODO(1588) Note that using pc with stm is deprecated, so we should perhaps
-  // handle this a bit differently.
-  __ stm(db_w, sp, restored_regs  | sp.bit() | lr.bit() | pc.bit());
+  //  __ stm(db_w, sp, restored_regs  | sp.bit() | lr.bit() | pc.bit());
+  // Usage of pc and sp is impossible in thumb, and pc usage is depricated on arm,
+  // so we save pc, lr, and sp manually.
+  __ mov(ip, pc);
+  __ str(ip, MemOperand(sp, -kPointerSize));
+  __ str(lr, MemOperand(sp, -2 * kPointerSize));
+  __ str(sp, MemOperand(sp, -3 * kPointerSize));
+  __ sub(sp, sp, Operand(3 * kPointerSize));
+  // Push the rest.
+  __ stm(db_w, sp, restored_regs);
 
   const int kSavedRegistersAreaSize =
       (kNumberOfRegisters * kPointerSize) + kDoubleRegsSize;

@@ -67,6 +67,7 @@ class AssemblerBase: public Malloced {
 
   bool predictable_code_size() const { return predictable_code_size_; }
   void set_predictable_code_size(bool value) { predictable_code_size_ = value; }
+  virtual void enter_predictable_mode() { }
 
   uint64_t enabled_cpu_features() const { return enabled_cpu_features_; }
   void set_enabled_cpu_features(uint64_t features) {
@@ -81,6 +82,11 @@ class AssemblerBase: public Malloced {
   static void QuietNaN(HeapObject* nan) { }
 
   int pc_offset() const { return static_cast<int>(pc_ - buffer_); }
+
+  intptr_t pc_mod(int n) const {
+    ASSERT(IsPowerOf2(n));
+    return reinterpret_cast<intptr_t>(pc_) & (n - 1);
+  }
 
   static const int kMinimalBufferSize = 4*KB;
 

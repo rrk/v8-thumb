@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -57,7 +57,7 @@ class ArmDebugger {
   explicit ArmDebugger(Simulator* sim) : sim_(sim) { }
   ~ArmDebugger();
 
-  void Stop(Instruction* instr);
+  void Stop(arm::Instruction* instr);
   void Debug();
 
  private:
@@ -75,8 +75,8 @@ class ArmDebugger {
   bool GetVFPDoubleValue(const char* desc, double* value);
 
   // Set or delete a breakpoint. Returns true if successful.
-  bool SetBreakpoint(Instruction* breakpc);
-  bool DeleteBreakpoint(Instruction* breakpc);
+  bool SetBreakpoint(arm::Instruction* breakpc);
+  bool DeleteBreakpoint(arm::Instruction* breakpc);
 
   // Undo and redo all breakpoints. This is needed to bracket disassembly and
   // execution to skip past breakpoints when run from the debugger.
@@ -102,12 +102,12 @@ static void InitializeCoverage() {
 }
 
 
-void ArmDebugger::Stop(Instruction* instr) {
+void ArmDebugger::Stop(arm::Instruction* instr) {
   // Get the stop code.
   uint32_t code = instr->SvcValue() & kStopCodeMask;
   // Retrieve the encoded address, which comes just after this stop.
   char** msg_address =
-    reinterpret_cast<char**>(sim_->get_pc() + Instruction::kInstrSize);
+    reinterpret_cast<char**>(sim_->get_pc() + arm::Instruction::kInstrSize);
   char* msg = *msg_address;
   ASSERT(msg != NULL);
 
@@ -123,9 +123,9 @@ void ArmDebugger::Stop(Instruction* instr) {
     }
     // Overwrite the instruction and address with nops.
     instr->SetInstructionBits(kNopInstr);
-    reinterpret_cast<Instruction*>(msg_address)->SetInstructionBits(kNopInstr);
+    reinterpret_cast<arm::Instruction*>(msg_address)->SetInstructionBits(kNopInstr);
   }
-  sim_->set_pc(sim_->get_pc() + 2 * Instruction::kInstrSize);
+  sim_->set_pc(sim_->get_pc() + 2 * arm::Instruction::kInstrSize);
 }
 
 #else  // ndef GENERATED_CODE_COVERAGE
@@ -134,12 +134,12 @@ static void InitializeCoverage() {
 }
 
 
-void ArmDebugger::Stop(Instruction* instr) {
+void ArmDebugger::Stop(arm::Instruction* instr) {
   // Get the stop code.
   uint32_t code = instr->SvcValue() & kStopCodeMask;
   // Retrieve the encoded address, which comes just after this stop.
   char* msg = *reinterpret_cast<char**>(sim_->get_pc()
-                                        + Instruction::kInstrSize);
+                                        + arm::Instruction::kInstrSize);
   // Update this stop description.
   if (sim_->isWatchedStop(code) && !sim_->watched_stops_[code].desc) {
     sim_->watched_stops_[code].desc = msg;
@@ -150,7 +150,7 @@ void ArmDebugger::Stop(Instruction* instr) {
   } else {
     PrintF("Simulator hit %s\n", msg);
   }
-  sim_->set_pc(sim_->get_pc() + 2 * Instruction::kInstrSize);
+  sim_->set_pc(sim_->get_pc() + 2 * arm::Instruction::kInstrSize);
   Debug();
 }
 #endif
@@ -213,7 +213,7 @@ bool ArmDebugger::GetVFPDoubleValue(const char* desc, double* value) {
 }
 
 
-bool ArmDebugger::SetBreakpoint(Instruction* breakpc) {
+bool ArmDebugger::SetBreakpoint(arm::Instruction* breakpc) {
   // Check if a breakpoint can be set. If not return without any side-effects.
   if (sim_->break_pc_ != NULL) {
     return false;
@@ -228,7 +228,7 @@ bool ArmDebugger::SetBreakpoint(Instruction* breakpc) {
 }
 
 
-bool ArmDebugger::DeleteBreakpoint(Instruction* breakpc) {
+bool ArmDebugger::DeleteBreakpoint(arm::Instruction* breakpc) {
   if (sim_->break_pc_ != NULL) {
     sim_->break_pc_->SetInstructionBits(sim_->break_instr_);
   }
@@ -307,10 +307,10 @@ void ArmDebugger::Debug() {
                         "%" XSTR(ARG_SIZE) "s",
                         cmd, arg1, arg2);
       if ((strcmp(cmd, "si") == 0) || (strcmp(cmd, "stepi") == 0)) {
-        sim_->InstructionDecode(reinterpret_cast<Instruction*>(sim_->get_pc()));
+        sim_->InstructionDecode(reinterpret_cast<arm::Instruction*>(sim_->get_pc()));
       } else if ((strcmp(cmd, "c") == 0) || (strcmp(cmd, "cont") == 0)) {
         // Execute the one instruction we broke at with breakpoints disabled.
-        sim_->InstructionDecode(reinterpret_cast<Instruction*>(sim_->get_pc()));
+        sim_->InstructionDecode(reinterpret_cast<arm::Instruction*>(sim_->get_pc()));
         // Leave the debugger shell.
         done = true;
       } else if ((strcmp(cmd, "p") == 0) || (strcmp(cmd, "print") == 0)) {
@@ -436,7 +436,7 @@ void ArmDebugger::Debug() {
 
         if (argc == 1) {
           cur = reinterpret_cast<byte*>(sim_->get_pc());
-          end = cur + (10 * Instruction::kInstrSize);
+          end = cur + (10 * arm::Instruction::kInstrSize);
         } else if (argc == 2) {
           int regnum = Registers::Number(arg1);
           if (regnum != kNoRegister || strncmp(arg1, "0x", 2) == 0) {
@@ -445,7 +445,7 @@ void ArmDebugger::Debug() {
             if (GetValue(arg1, &value)) {
               cur = reinterpret_cast<byte*>(value);
               // Disassemble 10 instructions at <arg1>.
-              end = cur + (10 * Instruction::kInstrSize);
+              end = cur + (10 * arm::Instruction::kInstrSize);
             }
           } else {
             // The argument is the number of instructions.
@@ -453,7 +453,7 @@ void ArmDebugger::Debug() {
             if (GetValue(arg1, &value)) {
               cur = reinterpret_cast<byte*>(sim_->get_pc());
               // Disassemble <arg1> instructions.
-              end = cur + (value * Instruction::kInstrSize);
+              end = cur + (value * arm::Instruction::kInstrSize);
             }
           }
         } else {
@@ -461,7 +461,7 @@ void ArmDebugger::Debug() {
           int32_t value2;
           if (GetValue(arg1, &value1) && GetValue(arg2, &value2)) {
             cur = reinterpret_cast<byte*>(value1);
-            end = cur + (value2 * Instruction::kInstrSize);
+            end = cur + (value2 * arm::Instruction::kInstrSize);
           }
         }
 
@@ -479,7 +479,7 @@ void ArmDebugger::Debug() {
         if (argc == 2) {
           int32_t value;
           if (GetValue(arg1, &value)) {
-            if (!SetBreakpoint(reinterpret_cast<Instruction*>(value))) {
+            if (!SetBreakpoint(reinterpret_cast<arm::Instruction*>(value))) {
               PrintF("setting breakpoint failed\n");
             }
           } else {
@@ -504,10 +504,10 @@ void ArmDebugger::Debug() {
         PrintF("INEXACT flag: %d;\n", sim_->inexact_vfp_flag_);
       } else if (strcmp(cmd, "stop") == 0) {
         int32_t value;
-        intptr_t stop_pc = sim_->get_pc() - 2 * Instruction::kInstrSize;
-        Instruction* stop_instr = reinterpret_cast<Instruction*>(stop_pc);
-        Instruction* msg_address =
-          reinterpret_cast<Instruction*>(stop_pc + Instruction::kInstrSize);
+        intptr_t stop_pc = sim_->get_pc() - 2 * arm::Instruction::kInstrSize;
+        arm::Instruction* stop_instr = reinterpret_cast<arm::Instruction*>(stop_pc);
+        arm::Instruction* msg_address =
+          reinterpret_cast<arm::Instruction*>(stop_pc + arm::Instruction::kInstrSize);
         if ((argc == 2) && (strcmp(arg1, "unstop") == 0)) {
           // Remove the current stop.
           if (sim_->isStopInstruction(stop_instr)) {
@@ -705,7 +705,7 @@ void Simulator::FlushOnePage(v8::internal::HashMap* i_cache,
 
 
 void Simulator::CheckICache(v8::internal::HashMap* i_cache,
-                            Instruction* instr) {
+                            arm::Instruction* instr) {
   intptr_t address = reinterpret_cast<intptr_t>(instr);
   void* page = reinterpret_cast<void*>(address & (~CachePage::kPageMask));
   void* line = reinterpret_cast<void*>(address & (~CachePage::kLineMask));
@@ -718,7 +718,7 @@ void Simulator::CheckICache(v8::internal::HashMap* i_cache,
     // Check that the data in memory matches the contents of the I-cache.
     CHECK(memcmp(reinterpret_cast<void*>(instr),
                  cache_page->CachedData(offset),
-                 Instruction::kInstrSize) == 0);
+                 arm::Instruction::kInstrSize) == 0);
   } else {
     // Cache miss.  Load memory into the cache.
     OS::MemCopy(cached_line, line, CachePage::kLineLength);
@@ -814,7 +814,7 @@ class Redirection {
     Simulator::current(isolate)->
         FlushICache(isolate->simulator_i_cache(),
                     reinterpret_cast<void*>(&swi_instruction_),
-                    Instruction::kInstrSize);
+                    arm::Instruction::kInstrSize);
     isolate->set_simulator_redirection(this);
   }
 
@@ -838,7 +838,7 @@ class Redirection {
     return new Redirection(external_function, type);
   }
 
-  static Redirection* FromSwiInstruction(Instruction* swi_instruction) {
+  static Redirection* FromSwiInstruction(arm::Instruction* swi_instruction) {
     char* addr_of_swi = reinterpret_cast<char*>(swi_instruction);
     char* addr_of_redirection =
         addr_of_swi - OFFSET_OF(Redirection, swi_instruction_);
@@ -895,7 +895,7 @@ int32_t Simulator::get_register(int reg) const {
   // See: http://gcc.gnu.org/bugzilla/show_bug.cgi?id=43949
   if (reg >= num_registers) return 0;
   // End stupid code.
-  return registers_[reg] + ((reg == pc) ? Instruction::kPCReadOffset : 0);
+  return registers_[reg] + ((reg == pc) ? arm::Instruction::kPCReadOffset : 0);
 }
 
 
@@ -1089,7 +1089,7 @@ void Simulator::TrashCallerSaveRegisters() {
 // targets that don't support unaligned loads and stores.
 
 
-int Simulator::ReadW(int32_t addr, Instruction* instr) {
+int Simulator::ReadW(int32_t addr, arm::Instruction* instr) {
   if (FLAG_enable_unaligned_accesses || (addr & 3) == 0) {
     intptr_t* ptr = reinterpret_cast<intptr_t*>(addr);
     return *ptr;
@@ -1103,7 +1103,7 @@ int Simulator::ReadW(int32_t addr, Instruction* instr) {
 }
 
 
-void Simulator::WriteW(int32_t addr, int value, Instruction* instr) {
+void Simulator::WriteW(int32_t addr, int value, arm::Instruction* instr) {
   if (FLAG_enable_unaligned_accesses || (addr & 3) == 0) {
     intptr_t* ptr = reinterpret_cast<intptr_t*>(addr);
     *ptr = value;
@@ -1116,7 +1116,7 @@ void Simulator::WriteW(int32_t addr, int value, Instruction* instr) {
 }
 
 
-uint16_t Simulator::ReadHU(int32_t addr, Instruction* instr) {
+uint16_t Simulator::ReadHU(int32_t addr, arm::Instruction* instr) {
   if (FLAG_enable_unaligned_accesses || (addr & 1) == 0) {
     uint16_t* ptr = reinterpret_cast<uint16_t*>(addr);
     return *ptr;
@@ -1131,7 +1131,7 @@ uint16_t Simulator::ReadHU(int32_t addr, Instruction* instr) {
 }
 
 
-int16_t Simulator::ReadH(int32_t addr, Instruction* instr) {
+int16_t Simulator::ReadH(int32_t addr, arm::Instruction* instr) {
   if (FLAG_enable_unaligned_accesses || (addr & 1) == 0) {
     int16_t* ptr = reinterpret_cast<int16_t*>(addr);
     return *ptr;
@@ -1143,7 +1143,7 @@ int16_t Simulator::ReadH(int32_t addr, Instruction* instr) {
 }
 
 
-void Simulator::WriteH(int32_t addr, uint16_t value, Instruction* instr) {
+void Simulator::WriteH(int32_t addr, uint16_t value, arm::Instruction* instr) {
   if (FLAG_enable_unaligned_accesses || (addr & 1) == 0) {
     uint16_t* ptr = reinterpret_cast<uint16_t*>(addr);
     *ptr = value;
@@ -1157,7 +1157,7 @@ void Simulator::WriteH(int32_t addr, uint16_t value, Instruction* instr) {
 }
 
 
-void Simulator::WriteH(int32_t addr, int16_t value, Instruction* instr) {
+void Simulator::WriteH(int32_t addr, int16_t value, arm::Instruction* instr) {
   if (FLAG_enable_unaligned_accesses || (addr & 1) == 0) {
     int16_t* ptr = reinterpret_cast<int16_t*>(addr);
     *ptr = value;
@@ -1227,7 +1227,7 @@ uintptr_t Simulator::StackLimit() const {
 
 
 // Unsupported instructions use Format to print an error and stop execution.
-void Simulator::Format(Instruction* instr, const char* format) {
+void Simulator::Format(arm::Instruction* instr, const char* format) {
   PrintF("Simulator found unsupported instruction:\n 0x%08x: %s\n",
          reinterpret_cast<intptr_t>(instr), format);
   UNIMPLEMENTED();
@@ -1236,7 +1236,7 @@ void Simulator::Format(Instruction* instr, const char* format) {
 
 // Checks if the current instruction should be executed based on its
 // condition bits.
-bool Simulator::ConditionallyExecute(Instruction* instr) {
+bool Simulator::ConditionallyExecute(arm::Instruction* instr) {
   switch (instr->ConditionField()) {
     case eq: return z_flag_;
     case ne: return !z_flag_;
@@ -1355,7 +1355,7 @@ void Simulator::Copy_FPSCR_to_APSR() {
 
 // Addressing Mode 1 - Data-processing operands:
 // Get the value based on the shifter_operand with register.
-int32_t Simulator::GetShiftRm(Instruction* instr, bool* carry_out) {
+int32_t Simulator::GetShiftRm(arm::Instruction* instr, bool* carry_out) {
   ShiftOp shift = instr->ShiftField();
   int shift_amount = instr->ShiftAmountValue();
   int32_t result = get_register(instr->RmValue());
@@ -1513,7 +1513,7 @@ int32_t Simulator::GetShiftRm(Instruction* instr, bool* carry_out) {
 
 // Addressing Mode 1 - Data-processing operands:
 // Get the value based on the shifter_operand with immediate.
-int32_t Simulator::GetImm(Instruction* instr, bool* carry_out) {
+int32_t Simulator::GetImm(arm::Instruction* instr, bool* carry_out) {
   int rotate = instr->RotateValue() * 2;
   int immed8 = instr->Immed8Value();
   int imm = (immed8 >> rotate) | (immed8 << (32 - rotate));
@@ -1534,7 +1534,7 @@ static int count_bits(int bit_vector) {
 }
 
 
-int32_t Simulator::ProcessPU(Instruction* instr,
+int32_t Simulator::ProcessPU(arm::Instruction* instr,
                              int num_regs,
                              int reg_size,
                              intptr_t* start_address,
@@ -1574,7 +1574,7 @@ int32_t Simulator::ProcessPU(Instruction* instr,
 
 
 // Addressing Mode 4 - Load and Store Multiple
-void Simulator::HandleRList(Instruction* instr, bool load) {
+void Simulator::HandleRList(arm::Instruction* instr, bool load) {
   int rlist = instr->RlistValue();
   int num_regs = count_bits(rlist);
 
@@ -1607,7 +1607,7 @@ void Simulator::HandleRList(Instruction* instr, bool load) {
 
 
 // Addressing Mode 6 - Load and Store Multiple Coprocessor registers.
-void Simulator::HandleVList(Instruction* instr) {
+void Simulator::HandleVList(arm::Instruction* instr) {
   VFPRegPrecision precision =
       (instr->SzValue() == 0) ? kSinglePrecision : kDoublePrecision;
   int operand_size = (precision == kSinglePrecision) ? 4 : 8;
@@ -1704,7 +1704,7 @@ typedef void (*SimulatorRuntimeProfilingGetterCallNew)(
 
 // Software interrupt instructions are used by the simulator to call into the
 // C-based V8 runtime.
-void Simulator::SoftwareInterrupt(Instruction* instr) {
+void Simulator::SoftwareInterrupt(arm::Instruction* instr) {
   int svc = instr->SvcValue();
   switch (svc) {
     case kCallRtRedirected: {
@@ -1993,7 +1993,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           ArmDebugger dbg(this);
           dbg.Stop(instr);
         } else {
-          set_pc(get_pc() + 2 * Instruction::kInstrSize);
+          set_pc(get_pc() + 2 * arm::Instruction::kInstrSize);
         }
       } else {
         // This is not a valid svc code.
@@ -2012,7 +2012,7 @@ double Simulator::canonicalizeNaN(double value) {
 
 
 // Stop helper functions.
-bool Simulator::isStopInstruction(Instruction* instr) {
+bool Simulator::isStopInstruction(arm::Instruction* instr) {
   return (instr->Bits(27, 24) == 0xF) && (instr->SvcValue() >= kStopCode);
 }
 
@@ -2087,7 +2087,7 @@ void Simulator::PrintStopInfo(uint32_t code) {
 
 // Instruction types 0 and 1 are both rolled into one function because they
 // only differ in the handling of the shifter_operand.
-void Simulator::DecodeType01(Instruction* instr) {
+void Simulator::DecodeType01(arm::Instruction* instr) {
   int type = instr->TypeValue();
   if ((type == 0) && instr->IsSpecialType0()) {
     // multiply instruction or extra loads and stores
@@ -2306,16 +2306,16 @@ void Simulator::DecodeType01(Instruction* instr) {
     if (instr->Bits(22, 21) == 1) {
       int rm = instr->RmValue();
       switch (instr->BitField(7, 4)) {
-        case BX:
+        case arm::BX:
           set_pc(get_register(rm));
           break;
-        case BLX: {
+        case arm::BLX: {
           uint32_t old_pc = get_pc();
           set_pc(get_register(rm));
-          set_register(lr, old_pc + Instruction::kInstrSize);
+          set_register(lr, old_pc + arm::Instruction::kInstrSize);
           break;
         }
-        case BKPT: {
+        case arm::BKPT: {
           ArmDebugger dbg(this);
           PrintF("Simulator hit BKPT.\n");
           dbg.Debug();
@@ -2328,7 +2328,7 @@ void Simulator::DecodeType01(Instruction* instr) {
       int rm = instr->RmValue();
       int rd = instr->RdValue();
       switch (instr->BitField(7, 4)) {
-        case CLZ: {
+        case arm::CLZ: {
           uint32_t bits = get_register(rm);
           int leading_zeros = 0;
           if (bits == 0) {
@@ -2366,7 +2366,7 @@ void Simulator::DecodeType01(Instruction* instr) {
     int32_t alu_out;
 
     switch (instr->OpcodeField()) {
-      case AND: {
+      case arm::AND: {
         // Format(instr, "and'cond's 'rd, 'rn, 'shift_rm");
         // Format(instr, "and'cond's 'rd, 'rn, 'imm");
         alu_out = rn_val & shifter_operand;
@@ -2378,7 +2378,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case EOR: {
+      case arm::EOR: {
         // Format(instr, "eor'cond's 'rd, 'rn, 'shift_rm");
         // Format(instr, "eor'cond's 'rd, 'rn, 'imm");
         alu_out = rn_val ^ shifter_operand;
@@ -2390,7 +2390,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case SUB: {
+      case arm::SUB: {
         // Format(instr, "sub'cond's 'rd, 'rn, 'shift_rm");
         // Format(instr, "sub'cond's 'rd, 'rn, 'imm");
         alu_out = rn_val - shifter_operand;
@@ -2403,7 +2403,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case RSB: {
+      case arm::RSB: {
         // Format(instr, "rsb'cond's 'rd, 'rn, 'shift_rm");
         // Format(instr, "rsb'cond's 'rd, 'rn, 'imm");
         alu_out = shifter_operand - rn_val;
@@ -2416,7 +2416,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case ADD: {
+      case arm::ADD: {
         // Format(instr, "add'cond's 'rd, 'rn, 'shift_rm");
         // Format(instr, "add'cond's 'rd, 'rn, 'imm");
         alu_out = rn_val + shifter_operand;
@@ -2429,7 +2429,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case ADC: {
+      case arm::ADC: {
         // Format(instr, "adc'cond's 'rd, 'rn, 'shift_rm");
         // Format(instr, "adc'cond's 'rd, 'rn, 'imm");
         alu_out = rn_val + shifter_operand + GetCarry();
@@ -2442,19 +2442,19 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case SBC: {
+      case arm::SBC: {
         Format(instr, "sbc'cond's 'rd, 'rn, 'shift_rm");
         Format(instr, "sbc'cond's 'rd, 'rn, 'imm");
         break;
       }
 
-      case RSC: {
+      case arm::RSC: {
         Format(instr, "rsc'cond's 'rd, 'rn, 'shift_rm");
         Format(instr, "rsc'cond's 'rd, 'rn, 'imm");
         break;
       }
 
-      case TST: {
+      case arm::TST: {
         if (instr->HasS()) {
           // Format(instr, "tst'cond 'rn, 'shift_rm");
           // Format(instr, "tst'cond 'rn, 'imm");
@@ -2469,7 +2469,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case TEQ: {
+      case arm::TEQ: {
         if (instr->HasS()) {
           // Format(instr, "teq'cond 'rn, 'shift_rm");
           // Format(instr, "teq'cond 'rn, 'imm");
@@ -2484,7 +2484,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case CMP: {
+      case arm::CMP: {
         if (instr->HasS()) {
           // Format(instr, "cmp'cond 'rn, 'shift_rm");
           // Format(instr, "cmp'cond 'rn, 'imm");
@@ -2501,7 +2501,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case CMN: {
+      case arm::CMN: {
         if (instr->HasS()) {
           // Format(instr, "cmn'cond 'rn, 'shift_rm");
           // Format(instr, "cmn'cond 'rn, 'imm");
@@ -2517,7 +2517,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case ORR: {
+      case arm::ORR: {
         // Format(instr, "orr'cond's 'rd, 'rn, 'shift_rm");
         // Format(instr, "orr'cond's 'rd, 'rn, 'imm");
         alu_out = rn_val | shifter_operand;
@@ -2529,7 +2529,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case MOV: {
+      case arm::MOV: {
         // Format(instr, "mov'cond's 'rd, 'shift_rm");
         // Format(instr, "mov'cond's 'rd, 'imm");
         alu_out = shifter_operand;
@@ -2541,7 +2541,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case BIC: {
+      case arm::BIC: {
         // Format(instr, "bic'cond's 'rd, 'rn, 'shift_rm");
         // Format(instr, "bic'cond's 'rd, 'rn, 'imm");
         alu_out = rn_val & ~shifter_operand;
@@ -2553,7 +2553,7 @@ void Simulator::DecodeType01(Instruction* instr) {
         break;
       }
 
-      case MVN: {
+      case arm::MVN: {
         // Format(instr, "mvn'cond's 'rd, 'shift_rm");
         // Format(instr, "mvn'cond's 'rd, 'imm");
         alu_out = ~shifter_operand;
@@ -2574,7 +2574,7 @@ void Simulator::DecodeType01(Instruction* instr) {
 }
 
 
-void Simulator::DecodeType2(Instruction* instr) {
+void Simulator::DecodeType2(arm::Instruction* instr) {
   int rd = instr->RdValue();
   int rn = instr->RnValue();
   int32_t rn_val = get_register(rn);
@@ -2638,7 +2638,7 @@ void Simulator::DecodeType2(Instruction* instr) {
 }
 
 
-void Simulator::DecodeType3(Instruction* instr) {
+void Simulator::DecodeType3(arm::Instruction* instr) {
   int rd = instr->RdValue();
   int rn = instr->RnValue();
   int32_t rn_val = get_register(rn);
@@ -2903,7 +2903,7 @@ void Simulator::DecodeType3(Instruction* instr) {
 }
 
 
-void Simulator::DecodeType4(Instruction* instr) {
+void Simulator::DecodeType4(arm::Instruction* instr) {
   ASSERT(instr->Bit(22) == 0);  // only allowed to be set in privileged mode
   if (instr->HasL()) {
     // Format(instr, "ldm'cond'pu 'rn'w, 'rlist");
@@ -2915,24 +2915,24 @@ void Simulator::DecodeType4(Instruction* instr) {
 }
 
 
-void Simulator::DecodeType5(Instruction* instr) {
+void Simulator::DecodeType5(arm::Instruction* instr) {
   // Format(instr, "b'l'cond 'target");
   int off = (instr->SImmed24Value() << 2);
   intptr_t pc_address = get_pc();
   if (instr->HasLink()) {
-    set_register(lr, pc_address + Instruction::kInstrSize);
+    set_register(lr, pc_address + arm::Instruction::kInstrSize);
   }
   int pc_reg = get_register(pc);
   set_pc(pc_reg + off);
 }
 
 
-void Simulator::DecodeType6(Instruction* instr) {
+void Simulator::DecodeType6(arm::Instruction* instr) {
   DecodeType6CoprocessorIns(instr);
 }
 
 
-void Simulator::DecodeType7(Instruction* instr) {
+void Simulator::DecodeType7(arm::Instruction* instr) {
   if (instr->Bit(24) == 1) {
     SoftwareInterrupt(instr);
   } else {
@@ -2957,7 +2957,7 @@ void Simulator::DecodeType7(Instruction* instr) {
 // vcmp(Dd, Dm)
 // vmrs
 // Dd = vsqrt(Dm)
-void Simulator::DecodeTypeVFP(Instruction* instr) {
+void Simulator::DecodeTypeVFP(arm::Instruction* instr) {
   ASSERT((instr->TypeValue() == 7) && (instr->Bit(24) == 0x0) );
   ASSERT(instr->Bits(11, 9) == 0x5);
 
@@ -3164,7 +3164,7 @@ void Simulator::DecodeTypeVFP(Instruction* instr) {
 
 
 void Simulator::DecodeVMOVBetweenCoreAndSinglePrecisionRegisters(
-    Instruction* instr) {
+    arm::Instruction* instr) {
   ASSERT((instr->Bit(4) == 1) && (instr->VCValue() == 0x0) &&
          (instr->VAValue() == 0x0));
 
@@ -3182,7 +3182,7 @@ void Simulator::DecodeVMOVBetweenCoreAndSinglePrecisionRegisters(
 }
 
 
-void Simulator::DecodeVCMP(Instruction* instr) {
+void Simulator::DecodeVCMP(arm::Instruction* instr) {
   ASSERT((instr->Bit(4) == 0) && (instr->Opc1Value() == 0x7));
   ASSERT(((instr->Opc2Value() == 0x4) || (instr->Opc2Value() == 0x5)) &&
          (instr->Opc3Value() & 0x1));
@@ -3220,7 +3220,7 @@ void Simulator::DecodeVCMP(Instruction* instr) {
 }
 
 
-void Simulator::DecodeVCVTBetweenDoubleAndSingle(Instruction* instr) {
+void Simulator::DecodeVCVTBetweenDoubleAndSingle(arm::Instruction* instr) {
   ASSERT((instr->Bit(4) == 0) && (instr->Opc1Value() == 0x7));
   ASSERT((instr->Opc2Value() == 0x7) && (instr->Opc3Value() == 0x3));
 
@@ -3298,7 +3298,7 @@ int VFPConversionSaturate(double val, bool unsigned_res) {
 }
 
 
-void Simulator::DecodeVCVTBetweenFloatingPointAndInteger(Instruction* instr) {
+void Simulator::DecodeVCVTBetweenFloatingPointAndInteger(arm::Instruction* instr) {
   ASSERT((instr->Bit(4) == 0) && (instr->Opc1Value() == 0x7) &&
          (instr->Bits(27, 23) == 0x1D));
   ASSERT(((instr->Opc2Value() == 0x8) && (instr->Opc3Value() & 0x1)) ||
@@ -3408,7 +3408,7 @@ void Simulator::DecodeVCVTBetweenFloatingPointAndInteger(Instruction* instr) {
 // <Rt, Rt2> = vmov(Dm)
 // Ddst = MEM(Rbase + 4*offset).
 // MEM(Rbase + 4*offset) = Dsrc.
-void Simulator::DecodeType6CoprocessorIns(Instruction* instr) {
+void Simulator::DecodeType6CoprocessorIns(arm::Instruction* instr) {
   ASSERT((instr->TypeValue() == 6));
 
   if (instr->CoprocessorValue() == 0xA) {
@@ -3518,7 +3518,7 @@ void Simulator::DecodeType6CoprocessorIns(Instruction* instr) {
 }
 
 
-void Simulator::DecodeSpecialCondition(Instruction* instr) {
+void Simulator::DecodeSpecialCondition(arm::Instruction* instr) {
   switch (instr->SpecialValue()) {
     case 5:
       if ((instr->Bits(18, 16) == 0) && (instr->Bits(11, 6) == 0x28) &&
@@ -3669,7 +3669,7 @@ void Simulator::DecodeSpecialCondition(Instruction* instr) {
 
 
 // Executes the current instruction.
-void Simulator::InstructionDecode(Instruction* instr) {
+void Simulator::InstructionDecode(arm::Instruction* instr) {
   if (v8::internal::FLAG_check_icache) {
     CheckICache(isolate_->simulator_i_cache(), instr);
   }
@@ -3724,11 +3724,11 @@ void Simulator::InstructionDecode(Instruction* instr) {
   // If the instruction is a non taken conditional stop, we need to skip the
   // inlined message address.
   } else if (instr->IsStop()) {
-    set_pc(get_pc() + 2 * Instruction::kInstrSize);
+    set_pc(get_pc() + 2 * arm::Instruction::kInstrSize);
   }
   if (!pc_modified_) {
     set_register(pc, reinterpret_cast<int32_t>(instr)
-                         + Instruction::kInstrSize);
+                         + arm::Instruction::kInstrSize);
   }
 }
 
@@ -3742,7 +3742,7 @@ void Simulator::Execute() {
     // Fast version of the dispatch loop without checking whether the simulator
     // should be stopping at a particular executed instruction.
     while (program_counter != end_sim_pc) {
-      Instruction* instr = reinterpret_cast<Instruction*>(program_counter);
+      arm::Instruction* instr = reinterpret_cast<arm::Instruction*>(program_counter);
       icount_++;
       InstructionDecode(instr);
       program_counter = get_pc();
@@ -3751,7 +3751,7 @@ void Simulator::Execute() {
     // FLAG_stop_sim_at is at the non-default value. Stop in the debugger when
     // we reach the particular instuction count.
     while (program_counter != end_sim_pc) {
-      Instruction* instr = reinterpret_cast<Instruction*>(program_counter);
+      arm::Instruction* instr = reinterpret_cast<arm::Instruction*>(program_counter);
       icount_++;
       if (icount_ == ::v8::internal::FLAG_stop_sim_at) {
         ArmDebugger dbg(this);

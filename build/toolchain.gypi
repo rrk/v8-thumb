@@ -87,6 +87,13 @@
         'defines': [
           'V8_TARGET_ARCH_ARM',
         ],
+        'conditions': [
+          ['arm_jit_thumb==1', {
+            'defines': [
+              'USE_THUMB',
+            ],
+          }],
+        ],
         'target_conditions': [
           ['_toolset=="host"', {
             'variables': {

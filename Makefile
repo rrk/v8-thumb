@@ -171,6 +171,15 @@ endif
 else
   GYPFLAGS += -Darm_float_abi=$(armfloatabi)
 endif
+# jitthumb=on/off
+ifeq ($(jitthumb), off)
+  GYPFLAGS += -Darm_jit_thumb=0
+else
+ifeq ($(jitthumb), on)
+  armthumb=on
+  GYPFLAGS += -Darm_jit_thumb=1
+endif
+endif
 # armthumb=on/off
 ifeq ($(armthumb), off)
   GYPFLAGS += -Darm_thumb=0

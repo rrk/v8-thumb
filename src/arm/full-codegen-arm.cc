@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -71,6 +71,7 @@ class JumpPatchSite BASE_EMBEDDED {
   void EmitJumpIfNotSmi(Register reg, Label* target) {
     ASSERT(!patch_site_.is_bound() && !info_emitted_);
     Assembler::BlockConstPoolScope block_const_pool(masm_);
+    PredictableCodeSizeScope(masm_, -1);
     __ bind(&patch_site_);
     __ cmp(reg, Operand(reg));
     __ b(eq, target);  // Always taken before patched.
@@ -81,6 +82,7 @@ class JumpPatchSite BASE_EMBEDDED {
   void EmitJumpIfSmi(Register reg, Label* target) {
     ASSERT(!patch_site_.is_bound() && !info_emitted_);
     Assembler::BlockConstPoolScope block_const_pool(masm_);
+    PredictableCodeSizeScope(masm_, -1);
     __ bind(&patch_site_);
     __ cmp(reg, Operand(reg));
     __ b(ne, target);  // Never taken before patched.
@@ -92,8 +94,8 @@ class JumpPatchSite BASE_EMBEDDED {
     if (patch_site_.is_bound()) {
       int delta_to_patch_site = masm_->InstructionsGeneratedSince(&patch_site_);
       Register reg;
-      reg.set_code(delta_to_patch_site / kOff12Mask);
-      __ cmp_raw_immediate(reg, delta_to_patch_site % kOff12Mask);
+      reg.set_code(delta_to_patch_site / arm::kOff12Mask);
+      __ cmp_raw_immediate(reg, delta_to_patch_site % arm::kOff12Mask);
 #ifdef DEBUG
       info_emitted_ = true;
 #endif
@@ -170,6 +172,9 @@ void FullCodeGenerator::Generate() {
     // for code aging to work properly.
     __ stm(db_w, sp, r1.bit() | cp.bit() | fp.bit() | lr.bit());
     __ nop(ip.code());
+#ifdef USE_THUMB
+    __ nop(ip.code());
+#endif
     // Adjust FP to point to saved FP.
     __ add(fp, sp, Operand(2 * kPointerSize));
   }
@@ -288,14 +293,18 @@ void FullCodeGenerator::Generate() {
       }
       VisitDeclarations(scope()->declarations());
     }
-
     { Comment cmnt(masm_, "[ Stack check");
       PrepareForBailoutForId(BailoutId::Declarations(), NO_REGISTERS);
       Label ok;
       __ LoadRoot(ip, Heap::kStackLimitRootIndex);
       __ cmp(sp, Operand(ip));
       __ b(hs, &ok);
-      PredictableCodeSizeScope predictable(masm_, 2 * Assembler::kInstrSize);
+#ifndef USE_THUMB
+      const int kCallStubSize = 2 * Assembler::kInstrSize;
+#else
+      const int kCallStubSize = 3 * Assembler::kInstrSize;
+#endif
+      PredictableCodeSizeScope predictable(masm_, kCallStubSize);
       StackCheckStub stub;
       __ CallStub(&stub);
       __ bind(&ok);
@@ -307,7 +316,6 @@ void FullCodeGenerator::Generate() {
       ASSERT(loop_depth() == 0);
     }
   }
-
   // Always emit a 'return undefined' in case control fell off the end of
   // the body.
   { Comment cmnt(masm_, "[ return <undefined>;");
@@ -365,18 +373,31 @@ void FullCodeGenerator::EmitBackEdgeBookkeeping(IterationStatement* stmt,
                  Max(1, distance / kCodeSizeMultiplier));
   }
   EmitProfilingCounterDecrement(weight);
-  __ b(pl, &ok);
-  InterruptStub stub;
-  __ CallStub(&stub);
 
-  // Record a mapping of this PC offset to the OSR id.  This is used to find
-  // the AST id from the unoptimized code in order to use it as a key into
-  // the deoptimization input data found in the optimized code.
-  RecordBackEdge(stmt->OsrEntryId());
+  {
+#ifndef USE_THUMB
+    const int kExpectedCodeSize = 6 * Assembler::kInstrSize;
+#else
+    const int kExpectedCodeSize = 11 * Assembler::kInstrSize;
+#endif
+    // This needs to be predictable!
+    // The patching machinery in deopt expects to see the offset
+    // of the following branch to be a known constant.
+    // See Deoptimizer::RevertInterrupCodeAt().
+    PredictableCodeSizeScope predictable(masm_, kExpectedCodeSize);
+    __ b(pl, &ok);
+    InterruptStub stub;
+    __ CallStub(&stub);
 
-  EmitProfilingCounterReset();
+    // Record a mapping of this PC offset to the OSR id.  This is used to find
+    // the AST id from the unoptimized code in order to use it as a key into
+    // the deoptimization input data found in the optimized code.
+    RecordBackEdge(stmt->OsrEntryId());
 
-  __ bind(&ok);
+    EmitProfilingCounterReset();
+
+    __ bind(&ok);
+  }
   PrepareForBailoutForId(stmt->EntryId(), NO_REGISTERS);
   // Record a mapping of the OSR id to this PC.  This is used if the OSR
   // entry becomes the target of a bailout.  We don't expect it to be, but
@@ -443,7 +464,7 @@ void FullCodeGenerator::EmitReturnSequence() {
       int no_frame_start = masm_->pc_offset();
       masm_->ldm(ia_w, sp, fp.bit() | lr.bit());
       masm_->add(sp, sp, Operand(sp_delta));
-      masm_->Jump(lr);
+      masm_->Ret();
       info_->AddNoFrameRange(no_frame_start, masm_->pc_offset());
     }
 
@@ -3516,7 +3537,9 @@ void FullCodeGenerator::EmitOneByteSeqStringSetChar(CallRuntime* expr) {
   __ add(ip,
          string,
          Operand(SeqOneByteString::kHeaderSize - kHeapObjectTag));
-  __ strb(value, MemOperand(ip, index, LSR, kSmiTagSize));
+  __ add(ip, ip, Operand(index, LSR, kSmiTagSize));
+  __ strb(value, MemOperand(ip));
+  //XXX: __ strb(value, MemOperand(ip, index, LSR, kSmiTagSize));
   context()->Plug(string);
 }
 
@@ -4885,7 +4908,7 @@ void FullCodeGenerator::ExitFinallyBlock() {
   // Uncook return address and return.
   __ pop(result_register());
   __ SmiUntag(r1);
-  __ add(pc, r1, Operand(masm_->CodeObject()));
+  __ Jump(r1, Operand(masm_->CodeObject()));
 }
 
 

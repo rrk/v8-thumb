@@ -875,7 +875,7 @@ void Deoptimizer::DoComputeOutputFrames() {
            " took %0.3f ms]\n",
            bailout_id_,
            node_id.ToInt(),
-           output_[index]->GetPc(),
+           output_[index]->GetPcRaw(),
            FullCodeGenerator::State2String(
                static_cast<FullCodeGenerator::State>(
                    output_[index]->GetState()->value())),
@@ -966,7 +966,7 @@ void Deoptimizer::DoComputeJSFrame(TranslationIterator* iterator,
   if (is_bottommost) {
     value = input_->GetFrameSlot(input_offset);
   } else {
-    value = output_[frame_index - 1]->GetPc();
+    value = output_[frame_index - 1]->GetPcRaw();
   }
   output_frame->SetCallerPc(output_offset, value);
   if (trace_) {
@@ -1110,7 +1110,7 @@ void Deoptimizer::DoComputeArgumentsAdaptorFrame(TranslationIterator* iterator,
 
   // Read caller's PC from the previous frame.
   output_offset -= kPCOnStackSize;
-  intptr_t callers_pc = output_[frame_index - 1]->GetPc();
+  intptr_t callers_pc = output_[frame_index - 1]->GetPcRaw();
   output_frame->SetCallerPc(output_offset, callers_pc);
   if (trace_) {
     PrintF("    0x%08" V8PRIxPTR ": [top + %d] <- 0x%08"
@@ -1213,7 +1213,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
 
   // Read caller's PC from the previous frame.
   output_offset -= kPCOnStackSize;
-  intptr_t callers_pc = output_[frame_index - 1]->GetPc();
+  intptr_t callers_pc = output_[frame_index - 1]->GetPcRaw();
   output_frame->SetCallerPc(output_offset, callers_pc);
   if (trace_) {
     PrintF("    0x%08" V8PRIxPTR ": [top + %d] <- 0x%08"
@@ -1350,7 +1350,7 @@ void Deoptimizer::DoComputeAccessorStubFrame(TranslationIterator* iterator,
 
   // Read caller's PC from the previous frame.
   output_offset -= kPCOnStackSize;
-  intptr_t callers_pc = output_[frame_index - 1]->GetPc();
+  intptr_t callers_pc = output_[frame_index - 1]->GetPcRaw();
   output_frame->SetCallerPc(output_offset, callers_pc);
   if (trace_) {
     PrintF("    0x%08" V8PRIxPTR ": [top + %u] <- 0x%08" V8PRIxPTR

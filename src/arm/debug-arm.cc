@@ -1,4 +1,4 @@
-// Copyright 2012 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -53,9 +53,15 @@ void BreakLocationIterator::SetDebugBreakAtReturn() {
   //   <debug break return code entry point address>
   //   bktp 0
   CodePatcher patcher(rinfo()->pc(), Assembler::kJSReturnSequenceInstructions);
-  patcher.masm()->ldr(v8::internal::ip, MemOperand(v8::internal::pc, 0));
+#ifndef USE_THUMB
+  const int call_size = 2 * Assembler::kInstrSize;
+#else
+  const int call_size = 3 * Assembler::kInstrSize;
+#endif
+  const int ldr_target = call_size - Assembler::kPcLoadDelta + patcher.masm()->pc_mod(4);
+  patcher.masm()->ldr(v8::internal::ip, MemOperand(v8::internal::pc, ldr_target));
   patcher.masm()->blx(v8::internal::ip);
-  patcher.Emit(Isolate::Current()->debug()->debug_break_return()->entry());
+  patcher.Emit(CPU::EncodePcAddress(Isolate::Current()->debug()->debug_break_return()->entry()));
   patcher.masm()->bkpt(0);
 }
 
@@ -93,9 +99,15 @@ void BreakLocationIterator::SetDebugBreakAtSlot() {
   //   blx ip
   //   <debug break slot code entry point address>
   CodePatcher patcher(rinfo()->pc(), Assembler::kDebugBreakSlotInstructions);
-  patcher.masm()->ldr(v8::internal::ip, MemOperand(v8::internal::pc, 0));
+#ifndef USE_THUMB
+  const int call_size = 2 * Assembler::kInstrSize;
+#else
+  const int call_size = 3 * Assembler::kInstrSize;
+#endif
+  const int ldr_target = call_size - Assembler::kPcLoadDelta + patcher.masm()->pc_mod(4);
+  patcher.masm()->ldr(v8::internal::ip, MemOperand(v8::internal::pc, ldr_target));
   patcher.masm()->blx(v8::internal::ip);
-  patcher.Emit(Isolate::Current()->debug()->debug_break_slot()->entry());
+  patcher.Emit(CPU::EncodePcAddress(Isolate::Current()->debug()->debug_break_slot()->entry()));
 }
 
 

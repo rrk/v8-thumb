@@ -1,0 +1,29 @@
+Thumb2 (16bit/32bit instructions) port
+================================================================================
+
+Building (cross-compiling on x86 linux):
+#export CXX=arm-linux-gnueabihf-g++-4.7
+#export LINK=arm-linux-gnueabihf-g++-4.7
+#make dependencies
+#make arm snapshot=off hardfp=on armthumb=on jitthumb=on
+
+Additional options:
+--enable-size-opt
+
+Optimizes code for size. Currently this allows the use of IT blocks to suppress
+the flag-setting behavior of short instructions. However this typically results
+in worse performance.
+
+Everything is implemented and works except:
+- disassembler
+- simulator
+
+Big problems (missed opportunities/future work):
+ - choice of r11 as fp is a bad one on thumb since most of the short instructions
+   support only r[0-7].
+ - choice of tagging scheme makes all fields offsets odd. Odd immediate offsets
+   are not encodable in 16-bit load/stores (4-byte alignment is required). So
+   all field accesses are 32-bit instructions.
+ - most assembly code assumes the ALU instruction don't set flags, but most 16-bit
+   instructions do. An IT block emission is required to suppress that. The code
+   needs to be refactored to use SetCC by default.

@@ -103,7 +103,8 @@
     'arm_neon%': 0,
     'arm_fpu%': 'vfpv3',
     'arm_float_abi%': 'default',
-    'arm_thumb': 'default',
+    'arm_thumb%': 'default',
+    'arm_jit_thumb%': 'default',
   },
   'target_defaults': {
     'variables': {

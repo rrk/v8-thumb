@@ -190,7 +190,7 @@ inline Address StandardFrame::caller_fp() const {
 
 
 inline Address StandardFrame::caller_pc() const {
-  return Memory::Address_at(ComputePCAddress(fp()));
+  return CPU::DecodePcAddress(Memory::Address_at(ComputePCAddress(fp())));
 }
 
 

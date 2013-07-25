@@ -62,7 +62,35 @@ class CPU : public AllStatic {
 
   // Try to activate a system level debugger.
   static void DebugBreak();
+
+  // encode pc
+  inline static intptr_t EncodePc(const intptr_t pc);
+  static Address EncodePcAddress(Address pc) {
+    return reinterpret_cast<Address>(EncodePc(reinterpret_cast<intptr_t>(pc)));
+  }
+  // decode pc
+  inline static intptr_t DecodePc(const intptr_t pc);
+  static Address DecodePcAddress(Address pc) {
+    return reinterpret_cast<Address>(DecodePc(reinterpret_cast<intptr_t>(pc)));
+  }
 };
+
+// XXX: Move these to some arch-specific file?
+inline intptr_t CPU::EncodePc(intptr_t pc) {
+#ifdef USE_THUMB
+  return pc | 1;
+#else
+  return pc;
+#endif
+}
+
+inline intptr_t CPU::DecodePc(intptr_t pc) {
+#ifdef USE_THUMB
+  return pc & ~1;
+#else
+  return pc;
+#endif
+}
 
 } }  // namespace v8::internal
 
